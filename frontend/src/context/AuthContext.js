@@ -41,6 +41,18 @@ export function AuthProvider({ children }) {
   const [auth, setAuth] = useState(() => readStoredAuth());
 
   useEffect(() => {
+    const handleLogout = () => {
+      setAuth(defaultAuthState);
+      localStorage.removeItem('token');
+      localStorage.removeItem(STORAGE_KEY);
+      sessionStorage.removeItem('token');
+    };
+
+    window.addEventListener('auth-logout', handleLogout);
+    return () => window.removeEventListener('auth-logout', handleLogout);
+  }, []);
+
+  useEffect(() => {
     if (auth.token) {
       localStorage.setItem('token', auth.token);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
@@ -70,6 +82,7 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('token');
     localStorage.removeItem(STORAGE_KEY);
     sessionStorage.removeItem('token');
+    window.dispatchEvent(new Event('auth-logout'));
   };
 
   const value = useMemo(

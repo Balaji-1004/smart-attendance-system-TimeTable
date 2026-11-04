@@ -1,70 +1,55 @@
-import { AuthProvider } from './context/AuthContext';
-import { useAuth } from './context/AuthContext';
-import AttendanceSessionPage from './pages/AttendanceSession';
-import FacultyTimetableView from './pages/FacultyTimetableView';
-import FaceRegistration from './pages/FaceRegistration';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import AppShell from './components/layout/AppShell';
+import ProtectedRoute from './routes/ProtectedRoute';
 import Login from './pages/Login';
+import HODDashboard from './pages/HODDashboard';
+import FacultyDashboard from './pages/FacultyDashboard';
+import StudentDashboard from './pages/StudentDashboard';
 import TimetableView from './pages/TimetableView';
-import { useState } from 'react';
+import FacultyTimetableView from './pages/FacultyTimetableView';
+import DepartmentTimetableView from './pages/DepartmentTimetableView';
+import AttendanceSessionPage from './pages/AttendanceSession';
+import FaceRegistration from './pages/FaceRegistration';
+import NotFound from './pages/NotFound';
 
-function AuthenticatedApp() {
-  const { role, logout } = useAuth();
-  const [showYearView, setShowYearView] = useState(role !== 'FACULTY');
-  const [activeView, setActiveView] = useState('timetable');
+function getDefaultDashboard(role) {
+  if (role === 'HOD') return '/hod/dashboard';
+  if (role === 'FACULTY') return '/faculty/dashboard';
+  if (role === 'STUDENT') return '/student/dashboard';
+  return '/login';
+}
 
-  if (role === 'FACULTY') {
-    const timetable = showYearView ? <TimetableView /> : <FacultyTimetableView />;
-
-    return (
-      <>
-        <div style={{ padding: '12px 24px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => setShowYearView((visible) => !visible)} style={{ marginRight: '8px' }}>
-              {showYearView ? 'View my timetable' : 'View year timetable'}
-            </button>
-            <button type="button" onClick={() => setActiveView('attendance')} style={{ padding: '8px 12px', border: activeView === 'attendance' ? '1px solid #2563eb' : '1px solid #d1d5db', borderRadius: '6px', background: activeView === 'attendance' ? '#eff6ff' : '#fff', cursor: 'pointer' }}>
-              Attendance
-            </button>
-          </div>
-          <button type="button" onClick={logout}>Log out</button>
-        </div>
-        {activeView === 'attendance' ? <AttendanceSessionPage /> : timetable}
-      </>
-    );
-  }
+function AppRoutes() {
+  const { token, role } = useAuth();
 
   return (
-    <>
-      <div style={{ padding: '12px 24px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button type="button" onClick={() => setActiveView('timetable')} style={{ padding: '8px 12px', border: activeView === 'timetable' ? '1px solid #2563eb' : '1px solid #d1d5db', borderRadius: '6px', background: activeView === 'timetable' ? '#eff6ff' : '#fff', cursor: 'pointer' }}>
-            Timetable
-          </button>
-          <button type="button" onClick={() => setActiveView('attendance')} style={{ padding: '8px 12px', border: activeView === 'attendance' ? '1px solid #2563eb' : '1px solid #d1d5db', borderRadius: '6px', background: activeView === 'attendance' ? '#eff6ff' : '#fff', cursor: 'pointer' }}>
-            Attendance
-          </button>
-          <button type="button" onClick={() => setActiveView('face-registration')} style={{ padding: '8px 12px', border: activeView === 'face-registration' ? '1px solid #2563eb' : '1px solid #d1d5db', borderRadius: '6px', background: activeView === 'face-registration' ? '#eff6ff' : '#fff', cursor: 'pointer' }}>
-            Face Registration
-          </button>
-        </div>
-        <button type="button" onClick={logout}>Log out</button>
-      </div>
-      {activeView === 'face-registration' ? <FaceRegistration /> : activeView === 'attendance' ? <AttendanceSessionPage /> : <TimetableView />}
-    </>
+    <Routes>
+      <Route path="/login" element={token ? <Navigate to={getDefaultDashboard(role)} replace /> : <Login />} />
+      <Route path="/" element={<Navigate to={token ? getDefaultDashboard(role) : '/login'} replace />} />
+
+      <Route path="/hod/dashboard" element={<ProtectedRoute roles={['HOD']}><AppShell><HODDashboard /></AppShell></ProtectedRoute>} />
+      <Route path="/faculty/dashboard" element={<ProtectedRoute roles={['FACULTY']}><AppShell><FacultyDashboard /></AppShell></ProtectedRoute>} />
+      <Route path="/student/dashboard" element={<ProtectedRoute roles={['STUDENT']}><AppShell><StudentDashboard /></AppShell></ProtectedRoute>} />
+
+      <Route path="/timetable" element={<ProtectedRoute roles={['HOD', 'FACULTY']}><AppShell><TimetableView /></AppShell></ProtectedRoute>} />
+      <Route path="/timetable/faculty" element={<ProtectedRoute roles={['FACULTY']}><AppShell><FacultyTimetableView /></AppShell></ProtectedRoute>} />
+      <Route path="/timetable/department" element={<ProtectedRoute roles={['HOD']}><AppShell><DepartmentTimetableView /></AppShell></ProtectedRoute>} />
+
+      <Route path="/attendance" element={<ProtectedRoute roles={['HOD', 'FACULTY']}><AppShell><AttendanceSessionPage /></AppShell></ProtectedRoute>} />
+      <Route path="/face-registration" element={<ProtectedRoute roles={['HOD']}><AppShell><FaceRegistration /></AppShell></ProtectedRoute>} />
+
+      <Route path="*" element={token ? <AppShell><NotFound /></AppShell> : <Navigate to="/login" replace />} />
+    </Routes>
   );
 }
 
-function AppContent() {
-  const { token } = useAuth();
-  return token ? <AuthenticatedApp /> : <Login />;
-}
-
-function App() {
+export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <BrowserRouter>
+        <AppRoutes />
+      </BrowserRouter>
     </AuthProvider>
   );
 }
-
-export default App;
