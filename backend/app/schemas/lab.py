@@ -17,5 +17,6 @@ class LabResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    department_id: int | None = None
     lab_code: str
     name: str

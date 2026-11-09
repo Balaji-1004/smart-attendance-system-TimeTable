@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import exc
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password, require_role
+from app.core.security import get_user_department_id, hash_password, require_role
 from app.database.database import get_db
 from app.models import AcademicYear, Student, User
 from app.models.user import Role
@@ -28,8 +28,11 @@ def create_student(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     academic_year = db.query(AcademicYear).filter(AcademicYear.id == payload.academic_year_id).first()
     if academic_year is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
+    if academic_year.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
 
     student = Student(
@@ -37,7 +40,7 @@ def create_student(
         name=payload.name.strip(),
         email=payload.email.strip(),
         academic_year_id=payload.academic_year_id,
-        department_id=academic_year.department_id,
+        department_id=department_id,
         user_id=None,
         face_registered=False,
     )
@@ -62,6 +65,7 @@ def create_student(
                 role=Role.STUDENT,
                 student_id=student.id,
                 faculty_id=None,
+                department_id=department_id,
             )
             db.add(user)
             db.flush()
@@ -82,10 +86,11 @@ def list_students(
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
     query = db.query(Student)
+    department_id = get_user_department_id(db, current_user)
     if academic_year_id is not None:
-        query = query.filter(Student.academic_year_id == academic_year_id)
-    elif current_user.role.value == "FACULTY":
-        query = query.filter(Student.id == -1)
+        query = query.filter(Student.academic_year_id == academic_year_id, Student.department_id == department_id)
+    else:
+        query = query.filter(Student.department_id == department_id)
     return query.order_by(Student.created_at.desc()).all()
 
 
@@ -95,8 +100,9 @@ def get_student(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     student = db.query(Student).filter(Student.id == student_id).first()
-    if student is None:
+    if student is None or student.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
     return student
 
@@ -108,8 +114,9 @@ def update_student(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     student = db.query(Student).filter(Student.id == student_id).first()
-    if student is None:
+    if student is None or student.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
 
     updates = payload.model_dump(exclude_unset=True)
@@ -118,10 +125,10 @@ def update_student(
 
     if "academic_year_id" in updates and updates["academic_year_id"] is not None:
         academic_year = db.query(AcademicYear).filter(AcademicYear.id == updates["academic_year_id"]).first()
-        if academic_year is None:
+        if academic_year is None or academic_year.department_id != department_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
         student.academic_year_id = updates["academic_year_id"]
-        student.department_id = academic_year.department_id
+        student.department_id = department_id
 
     for field in ("roll_number", "name", "email"):
         if field in updates and updates[field] is not None:
@@ -142,8 +149,9 @@ def delete_student(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     student = db.query(Student).filter(Student.id == student_id).first()
-    if student is None:
+    if student is None or student.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
 
     linked_user = None

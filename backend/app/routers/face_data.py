@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.core.security import require_role
+from app.core.security import get_user_department_id, require_role
 from app.database.database import get_db
 from app.models import FaceData, Student, User
 from app.schemas.face_data import FaceRegistrationResponse, FaceRegistrationStatusResponse
@@ -17,8 +17,9 @@ async def register_student_face(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     student = db.query(Student).filter(Student.id == student_id).first()
-    if student is None:
+    if student is None or student.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
 
     file_bytes = await file.read()
@@ -61,8 +62,9 @@ def get_student_face_registration_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     student = db.query(Student).filter(Student.id == student_id).first()
-    if student is None:
+    if student is None or student.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
 
     face_data = db.query(FaceData).filter(FaceData.student_id == student_id).first()

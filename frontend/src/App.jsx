@@ -11,6 +11,13 @@ import FacultyTimetableView from './pages/FacultyTimetableView';
 import DepartmentTimetableView from './pages/DepartmentTimetableView';
 import AttendanceSessionPage from './pages/AttendanceSession';
 import FaceRegistration from './pages/FaceRegistration';
+import AcademicYearsPage from './pages/AcademicYearsPage';
+import FacultyPage from './pages/FacultyPage';
+import SubjectsPage from './pages/SubjectsPage';
+import LabsPage from './pages/LabsPage';
+import StudentsPage from './pages/StudentsPage';
+import FacultyAvailabilityPage from './pages/FacultyAvailabilityPage';
+import AttendanceReports from './pages/AttendanceReports';
 import NotFound from './pages/NotFound';
 
 function getDefaultDashboard(role) {
@@ -29,6 +36,13 @@ function AppRoutes() {
       <Route path="/" element={<Navigate to={token ? getDefaultDashboard(role) : '/login'} replace />} />
 
       <Route path="/hod/dashboard" element={<ProtectedRoute roles={['HOD']}><AppShell><HODDashboard /></AppShell></ProtectedRoute>} />
+      <Route path="/academic-years" element={<ProtectedRoute roles={['HOD']}><AppShell><AcademicYearsPage /></AppShell></ProtectedRoute>} />
+      <Route path="/faculty" element={<ProtectedRoute roles={['HOD']}><AppShell><FacultyPage /></AppShell></ProtectedRoute>} />
+      <Route path="/subjects" element={<ProtectedRoute roles={['HOD']}><AppShell><SubjectsPage /></AppShell></ProtectedRoute>} />
+      <Route path="/labs" element={<ProtectedRoute roles={['HOD']}><AppShell><LabsPage /></AppShell></ProtectedRoute>} />
+      <Route path="/students" element={<ProtectedRoute roles={['HOD']}><AppShell><StudentsPage /></AppShell></ProtectedRoute>} />
+      <Route path="/faculty-availability" element={<ProtectedRoute roles={['HOD']}><AppShell><FacultyAvailabilityPage /></AppShell></ProtectedRoute>} />
+      <Route path="/reports" element={<ProtectedRoute roles={['HOD', 'FACULTY']}><AppShell><AttendanceReports /></AppShell></ProtectedRoute>} />
       <Route path="/faculty/dashboard" element={<ProtectedRoute roles={['FACULTY']}><AppShell><FacultyDashboard /></AppShell></ProtectedRoute>} />
       <Route path="/student/dashboard" element={<ProtectedRoute roles={['STUDENT']}><AppShell><StudentDashboard /></AppShell></ProtectedRoute>} />
 

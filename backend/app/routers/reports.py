@@ -2,12 +2,12 @@ from collections import defaultdict
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.security import require_role
+from app.core.security import get_user_department_id, require_role
 from app.database.database import get_db
-from app.models import Attendance, Student, Subject, User
+from app.models import AcademicYear, Attendance, Faculty, Student, Subject, User
 from app.models.enums import AttendanceStatus
 from app.schemas.reports import (
     AttendanceReportRow,
@@ -20,14 +20,13 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 
 
 def _faculty_subject_ids(db: Session, current_user: User) -> Optional[set[int]]:
-    if current_user.role.value == "HOD":
-        return None
-    return {
-        subject_id
-        for (subject_id,) in db.query(Subject.id)
-        .filter(Subject.faculty_id == current_user.faculty_id)
-        .all()
-    }
+    department_id = get_user_department_id(db, current_user)
+    query = db.query(Subject.id).join(
+        AcademicYear, AcademicYear.id == Subject.academic_year_id
+    ).filter(AcademicYear.department_id == department_id)
+    if current_user.role.value == "FACULTY":
+        query = query.filter(Subject.faculty_id == current_user.faculty_id)
+    return {subject_id for (subject_id,) in query.all()}
 
 
 def _row_response(row: Attendance) -> AttendanceReportRow:
@@ -55,16 +54,26 @@ def daily_attendance_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
-    query = db.query(Attendance).filter(Attendance.date == date_value)
-    allowed_subjects = _faculty_subject_ids(db, current_user)
-    if allowed_subjects is not None:
-        if not allowed_subjects:
-            return []
-        query = query.filter(Attendance.subject_id.in_(allowed_subjects))
+    department_id = get_user_department_id(db, current_user)
+    query = (
+        db.query(Attendance)
+        .join(AcademicYear, AcademicYear.id == Attendance.academic_year_id)
+        .filter(Attendance.date == date_value, AcademicYear.department_id == department_id)
+    )
     if academic_year_id is not None:
+        academic_year = db.query(AcademicYear).filter(AcademicYear.id == academic_year_id).first()
+        if academic_year is None or academic_year.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
         query = query.filter(Attendance.academic_year_id == academic_year_id)
     if subject_id is not None:
+        subject = db.query(Subject).filter(Subject.id == subject_id).first()
+        if subject is None or subject.academic_year.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
         query = query.filter(Attendance.subject_id == subject_id)
+    allowed_subjects = _faculty_subject_ids(db, current_user)
+    if not allowed_subjects:
+        return []
+    query = query.filter(Attendance.subject_id.in_(allowed_subjects))
     return [_row_response(row) for row in query.order_by(Attendance.time.asc()).all()]
 
 
@@ -75,8 +84,9 @@ def subject_attendance_report(
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
     subject = db.query(Subject).filter(Subject.id == subject_id).first()
-    if subject is None:
-        return []
+    department_id = get_user_department_id(db, current_user)
+    if subject is None or subject.academic_year.department_id != department_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
     allowed_subjects = _faculty_subject_ids(db, current_user)
     if allowed_subjects is not None and subject_id not in allowed_subjects:
         return []
@@ -128,12 +138,27 @@ def student_attendance_history(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
-    query = db.query(Attendance).filter(Attendance.student_id == student_id)
+    department_id = get_user_department_id(db, current_user)
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if student is None or student.department_id != department_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+    if subject_id is not None:
+        subject = db.query(Subject).filter(Subject.id == subject_id).first()
+        if subject is None or subject.academic_year.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
+
+    query = (
+        db.query(Attendance)
+        .join(AcademicYear, AcademicYear.id == Attendance.academic_year_id)
+        .filter(
+            Attendance.student_id == student_id,
+            AcademicYear.department_id == department_id,
+        )
+    )
     allowed_subjects = _faculty_subject_ids(db, current_user)
-    if allowed_subjects is not None:
-        if not allowed_subjects:
-            return []
-        query = query.filter(Attendance.subject_id.in_(allowed_subjects))
+    if not allowed_subjects:
+        return []
+    query = query.filter(Attendance.subject_id.in_(allowed_subjects))
     if subject_id is not None:
         query = query.filter(Attendance.subject_id == subject_id)
     return [_row_response(row) for row in query.order_by(Attendance.date.asc(), Attendance.time.asc()).all()]
@@ -146,6 +171,14 @@ def class_attendance_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
+    department_id = get_user_department_id(db, current_user)
+    academic_year = db.query(AcademicYear).filter(AcademicYear.id == academic_year_id).first()
+    if academic_year is None or academic_year.department_id != department_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
+    if faculty_id is not None:
+        faculty = db.query(Faculty).filter(Faculty.id == faculty_id).first()
+        if faculty is None or faculty.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty not found")
     query = db.query(Subject).filter(Subject.academic_year_id == academic_year_id)
     if current_user.role.value == "FACULTY":
         query = query.filter(Subject.faculty_id == current_user.faculty_id)

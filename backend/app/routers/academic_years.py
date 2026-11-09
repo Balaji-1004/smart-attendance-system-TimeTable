@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import exc
 from sqlalchemy.orm import Session
 
-from app.core.security import require_role
+from app.core.security import get_user_department_id, require_role
 from app.database.database import get_db
 from app.models import AcademicYear, Department, User
 from app.schemas.academic_year import AcademicYearCreate, AcademicYearResponse
@@ -16,11 +16,15 @@ def create_academic_year(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
-    department = db.query(Department).filter(Department.id == payload.department_id).first()
+    department_id = get_user_department_id(db, current_user)
+    if payload.department_id != department_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Academic year department must match your department.")
+
+    department = db.query(Department).filter(Department.id == department_id).first()
     if department is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
-    obj = AcademicYear(department_id=payload.department_id, name=payload.name.strip())
+    obj = AcademicYear(department_id=department_id, name=payload.name.strip())
     try:
         db.add(obj)
         db.commit()
@@ -39,17 +43,24 @@ def list_academic_years(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
-    return db.query(AcademicYear).order_by(AcademicYear.created_at.desc()).all()
+    department_id = get_user_department_id(db, current_user)
+    return (
+        db.query(AcademicYear)
+        .filter(AcademicYear.department_id == department_id)
+        .order_by(AcademicYear.created_at.desc())
+        .all()
+    )
 
 
 @router.get("/{academic_year_id}", response_model=AcademicYearResponse)
 def get_academic_year(
     academic_year_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("HOD")),
+    current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
+    department_id = get_user_department_id(db, current_user)
     obj = db.query(AcademicYear).filter(AcademicYear.id == academic_year_id).first()
-    if obj is None:
+    if obj is None or obj.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
     return obj
 
@@ -61,15 +72,14 @@ def update_academic_year(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     obj = db.query(AcademicYear).filter(AcademicYear.id == academic_year_id).first()
-    if obj is None:
+    if obj is None or obj.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
+    if payload.department_id != department_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Academic year department must match your department.")
 
-    department = db.query(Department).filter(Department.id == payload.department_id).first()
-    if department is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
-
-    obj.department_id = payload.department_id
+    obj.department_id = department_id
     obj.name = payload.name.strip()
     try:
         db.commit()
@@ -89,8 +99,9 @@ def delete_academic_year(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     obj = db.query(AcademicYear).filter(AcademicYear.id == academic_year_id).first()
-    if obj is None:
+    if obj is None or obj.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
 
     try:

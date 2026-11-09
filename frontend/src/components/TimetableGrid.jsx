@@ -86,6 +86,12 @@ export default function TimetableGrid({ entries = [], onRefresh }) {
   const [labError, setLabError] = useState('');
 
   useEffect(() => {
+    if (role !== 'HOD' && role !== 'FACULTY') {
+      setLabs([]);
+      setLabError('');
+      return;
+    }
+
     const loadLabs = async () => {
       try {
         const response = await api.get('/labs');
@@ -95,7 +101,7 @@ export default function TimetableGrid({ entries = [], onRefresh }) {
       }
     };
     loadLabs();
-  }, []);
+  }, [role]);
 
   const saveEntry = async (entryId, payload) => {
     await api.put(`/timetable/${entryId}`, payload);

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token, verify_password
+from app.core.security import create_access_token, get_user_department_id, verify_password
 from app.database.database import get_db
 from app.models import User
 from app.schemas.auth import LoginRequest, TokenResponse
@@ -18,10 +18,12 @@ def login_user(payload: LoginRequest, db: Session = Depends(get_db)):
             detail="Incorrect username or password",
         )
 
+    department_id = get_user_department_id(db, user)
     token_payload = {
         "sub": str(user.id),
         "username": user.username,
         "role": user.role.value,
+        "department_id": department_id,
         "faculty_id": user.faculty_id,
         "student_id": user.student_id,
     }
@@ -31,6 +33,7 @@ def login_user(payload: LoginRequest, db: Session = Depends(get_db)):
         token_type="bearer",
         role=user.role.value,
         username=user.username,
+        department_id=department_id,
         faculty_id=user.faculty_id,
         student_id=user.student_id,
     )

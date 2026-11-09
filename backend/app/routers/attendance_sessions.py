@@ -4,9 +4,9 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.core.security import require_role
+from app.core.security import get_user_department_id, require_role
 from app.database.database import get_db
-from app.models import Attendance, AttendanceSession, FaceData, Student, TimetableEntry, User
+from app.models import AcademicYear, Attendance, AttendanceSession, FaceData, Student, TimetableEntry, User
 from app.models.enums import AttendanceStatus, SessionStatus
 from app.schemas.attendance import AttendanceResponse, MarkAttendanceRequest
 from app.schemas.attendance_session import AttendanceSessionCreate, AttendanceSessionResponse
@@ -23,7 +23,13 @@ from app.services.face_service import (
 router = APIRouter(prefix="/attendance-sessions", tags=["attendance-sessions"])
 
 
-def _check_ownership(session_or_entry, current_user: User):
+def _check_ownership(session_or_entry, current_user: User, db: Session):
+    department_id = get_user_department_id(db, current_user)
+    if session_or_entry.academic_year.department_id != department_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attendance session not found",
+        )
     if current_user.role.value == "FACULTY" and session_or_entry.faculty_id != current_user.faculty_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -41,7 +47,7 @@ def start_attendance_session(
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Timetable entry not found")
 
-    _check_ownership(entry, current_user)
+    _check_ownership(entry, current_user, db)
 
     today = date.today()
     existing = (
@@ -87,7 +93,7 @@ def mark_attendance(
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attendance session not found")
 
-    _check_ownership(session, current_user)
+    _check_ownership(session, current_user, db)
     if session.status == SessionStatus.CLOSED:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot mark attendance on a closed session.")
 
@@ -139,7 +145,7 @@ async def recognize_student_for_session(
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attendance session not found")
 
-    _check_ownership(session, current_user)
+    _check_ownership(session, current_user, db)
     if session.status == SessionStatus.CLOSED:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot recognize attendance on a closed session.")
 
@@ -218,7 +224,7 @@ def close_attendance_session(
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attendance session not found")
 
-    _check_ownership(session, current_user)
+    _check_ownership(session, current_user, db)
     if session.status == SessionStatus.CLOSED:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Session is already closed.")
 
@@ -266,7 +272,12 @@ def list_attendance_sessions(
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
     query = db.query(AttendanceSession)
-    if current_user.role.value == "FACULTY":
+    if current_user.role.value == "HOD":
+        department_id = get_user_department_id(db, current_user)
+        query = query.join(AcademicYear, AcademicYear.id == AttendanceSession.academic_year_id).filter(
+            AcademicYear.department_id == department_id
+        )
+    else:
         query = query.filter(AttendanceSession.faculty_id == current_user.faculty_id)
     if date_filter is not None:
         query = query.filter(AttendanceSession.date == date_filter)
@@ -287,5 +298,5 @@ def get_attendance_session(
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attendance session not found")
 
-    _check_ownership(session, current_user)
+    _check_ownership(session, current_user, db)
     return session

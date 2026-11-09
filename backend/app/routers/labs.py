@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import exc
 from sqlalchemy.orm import Session
 
-from app.core.security import require_role
+from app.core.security import get_user_department_id, require_role
 from app.database.database import get_db
 from app.models import Faculty, Lab, User
 from app.schemas.lab import LabCreate, LabResponse, LabUpdate
@@ -23,7 +23,9 @@ def create_lab(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     lab = Lab(
+        department_id=department_id,
         lab_code=payload.lab_code.strip(),
         name=payload.name.strip(),
     )
@@ -42,17 +44,19 @@ def list_labs(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
-    return db.query(Lab).order_by(Lab.id.asc()).all()
+    department_id = get_user_department_id(db, current_user)
+    return db.query(Lab).filter(Lab.department_id == department_id).order_by(Lab.id.asc()).all()
 
 
 @router.get("/{lab_id}", response_model=LabResponse)
 def get_lab(
     lab_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role("HOD")),
+    current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
+    department_id = get_user_department_id(db, current_user)
     lab = db.query(Lab).filter(Lab.id == lab_id).first()
-    if lab is None:
+    if lab is None or lab.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
     return lab
 
@@ -64,8 +68,9 @@ def update_lab(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     lab = db.query(Lab).filter(Lab.id == lab_id).first()
-    if lab is None:
+    if lab is None or lab.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
 
     updates = payload.model_dump(exclude_unset=True)
@@ -91,8 +96,9 @@ def delete_lab(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     lab = db.query(Lab).filter(Lab.id == lab_id).first()
-    if lab is None:
+    if lab is None or lab.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
 
     try:

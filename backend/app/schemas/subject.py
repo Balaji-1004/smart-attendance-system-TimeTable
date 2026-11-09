@@ -15,6 +15,7 @@ class SubjectCreate(BaseModel):
 
 
 class SubjectUpdate(BaseModel):
+    academic_year_id: int | None = None
     name: str | None = None
     code: str | None = None
     subject_type: SubjectType | None = None

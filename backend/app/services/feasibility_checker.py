@@ -2,7 +2,7 @@ import math
 
 from sqlalchemy import func
 
-from app.models import Faculty, Lab, Subject
+from app.models import AcademicYear, Faculty, Lab, Subject
 from app.models.enums import SubjectType
 
 
@@ -33,7 +33,12 @@ def check_faculty_feasibility(db, faculty_id):
 
 
 def check_lab_feasibility(db, academic_year_id):
-    lab_rows = db.query(Lab).count()
+    academic_year = db.query(AcademicYear).filter(AcademicYear.id == academic_year_id).first()
+    lab_query = db.query(Lab)
+    if academic_year is None:
+        lab_rows = 0
+    else:
+        lab_rows = lab_query.filter(Lab.department_id == academic_year.department_id).count()
     # Rough estimate: each lab room has 2 valid block starts per day (P1 and P4), across 5 days.
     # This is an approximation only; it is not a scheduling guarantee.
     available_lab_block_capacity = max(lab_rows * 10, 0)

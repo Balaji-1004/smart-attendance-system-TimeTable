@@ -47,12 +47,17 @@ def seed_minimal_data():
             db.commit()
             db.refresh(ay)
 
-        faculty = db.query(Faculty).filter(Faculty.faculty_code == 'FAC-TEST-1').first()
-        if faculty is None:
-            faculty = Faculty(name='Test Faculty', faculty_code='FAC-TEST-1', email='test1@example.com')
-            db.add(faculty)
-            db.commit()
-            db.refresh(faculty)
+        next_faculty_id = (db.query(Faculty.id).order_by(Faculty.id.desc()).first() or (0,))[0] + 1
+        faculty_code = f'FAC-TEST-ISOLATED-{next_faculty_id}'
+        faculty = Faculty(
+            name='Test Faculty',
+            faculty_code=faculty_code,
+            email=f'test-validator-{next_faculty_id}@example.com',
+            department_id=dept.id,
+        )
+        db.add(faculty)
+        db.commit()
+        db.refresh(faculty)
 
         if db.query(User).filter(User.username == 'validator_faculty').first() is None:
             db.add(User(username='validator_faculty', password_hash='hash', role=Role.FACULTY, faculty_id=faculty.id, student_id=None))
@@ -107,7 +112,20 @@ def demo():
         subject_id = setup['subject_id']
 
         # 5a checks
-        ok, reason = check_year_clash(db, year_id, WeekDay.MONDAY, Period.P1)
+        year_slot = next(
+            (
+                (day, period)
+                for day in WeekDay
+                for period in Period
+                if check_year_clash(db, year_id, day, period)[0]
+            ),
+            None,
+        )
+        ok, reason = (
+            check_year_clash(db, year_id, *year_slot)
+            if year_slot is not None
+            else (False, "No free academic-year slot.")
+        )
         print_result('year clash valid', ok is True, reason)
         ok, reason = check_year_clash(db, year_id, WeekDay.MONDAY, Period.P1, pending_entries=[{'academic_year_id': year_id, 'day': WeekDay.MONDAY, 'period': Period.P1, 'faculty_id': faculty_id, 'lab_id': None, 'id': 9999}])
         print_result('year clash invalid with pending entry', ok is False, reason)
@@ -132,10 +150,6 @@ def demo():
         ok, reason = check_faculty_weekly_limit(db, faculty_id, pending_entries=[{'faculty_id': faculty_id, 'id': 4000} for _ in range(16)])
         print_result('weekly limit invalid', ok is False, reason)
 
-        existing_availability = db.query(FacultyAvailability).filter(FacultyAvailability.faculty_id == faculty_id, FacultyAvailability.day == WeekDay.FRIDAY, FacultyAvailability.period == Period.P5).first()
-        if existing_availability:
-            db.delete(existing_availability)
-            db.commit()
         ok, reason = check_faculty_availability(db, faculty_id, WeekDay.FRIDAY, Period.P5)
         print_result('faculty availability valid', ok is True, reason)
         db.add(FacultyAvailability(faculty_id=faculty_id, day=WeekDay.FRIDAY, period=Period.P5))
@@ -174,7 +188,15 @@ def demo():
             period=Period.P1,
             lab_id=None,
             subject_type='THEORY',
-            pending_entries=[],
+            pending_entries=[{
+                'academic_year_id': year_id,
+                'subject_id': subject_id,
+                'faculty_id': faculty_id,
+                'day': WeekDay.THURSDAY,
+                'period': Period.P1,
+                'lab_id': None,
+                'id': 9000,
+            }],
         )
         print_result('validate_single_entry fail case', ok is False, reasons)
 
@@ -189,29 +211,48 @@ def demo():
         ok, reason = check_lab_concurrency(db, WeekDay.FRIDAY, Period.P4, 1, pending_entries=[{'day': WeekDay.FRIDAY, 'period': Period.P4, 'lab_id': lab_id, 'id': 5000}])
         print_result('lab concurrency invalid', ok is False, reason)
 
-        ok, reasons = validate_lab_block(
-            db,
-            academic_year_id=year_id,
-            subject_id=subject_id,
-            faculty_id=faculty_id,
-            lab_id=lab_id,
-            day=WeekDay.TUESDAY,
-            start_period=Period.P1,
-            lab_total_count=1,
-            pending_entries=[],
-        )
+        lab_total_count = db.query(Lab).count()
+        valid_lab_block = None
+        for day in WeekDay:
+            for start_period in (Period.P1, Period.P4):
+                result = validate_lab_block(
+                    db,
+                    academic_year_id=year_id,
+                    subject_id=subject_id,
+                    faculty_id=faculty_id,
+                    lab_id=lab_id,
+                    day=day,
+                    start_period=start_period,
+                    lab_total_count=lab_total_count,
+                    pending_entries=[],
+                )
+                if result[0]:
+                    valid_lab_block = (day, start_period)
+                    break
+            if valid_lab_block is not None:
+                break
+        ok, reasons = (True, []) if valid_lab_block is not None else (False, ["No valid lab block slot found."])
         print_result('validate_lab_block pass case', ok is True, reasons)
 
+        failure_day, failure_start = valid_lab_block or (WeekDay.TUESDAY, Period.P1)
         ok, reasons = validate_lab_block(
             db,
             academic_year_id=year_id,
             subject_id=subject_id,
             faculty_id=faculty_id,
             lab_id=lab_id,
-            day=WeekDay.TUESDAY,
-            start_period=Period.P1,
-            lab_total_count=1,
-            pending_entries=[{'academic_year_id': year_id, 'subject_id': subject_id, 'faculty_id': faculty_id, 'day': WeekDay.TUESDAY, 'period': Period.P1, 'lab_id': lab_id, 'id': 6000}],
+            day=failure_day,
+            start_period=failure_start,
+            lab_total_count=lab_total_count,
+            pending_entries=[{
+                'academic_year_id': year_id,
+                'subject_id': subject_id,
+                'faculty_id': faculty_id,
+                'day': failure_day,
+                'period': failure_start,
+                'lab_id': lab_id,
+                'id': 6000,
+            }],
         )
         print_result('validate_lab_block fail case', ok is False, reasons)
 
@@ -228,6 +269,20 @@ def demo():
             if existing is None:
                 db.add(Subject(academic_year_id=ay_big.id, name=f'Heavy {idx}', code=code, subject_type=SubjectType.THEORY.value, weekly_periods=5, faculty_id=faculty_id))
         db.commit()
+        lab_requirement = db.query(Subject).filter_by(
+            academic_year_id=ay_big.id,
+            code='HEAVY-LAB-REQUIREMENT',
+        ).first()
+        if lab_requirement is None:
+            db.add(Subject(
+                academic_year_id=ay_big.id,
+                name='Heavy Lab Requirement',
+                code='HEAVY-LAB-REQUIREMENT',
+                subject_type=SubjectType.LAB.value,
+                weekly_periods=63,
+                faculty_id=faculty_id,
+            ))
+            db.commit()
         warnings = check_year_feasibility(db, ay_big.id)
         print_result('year feasibility catches overload', bool(warnings), warnings)
 

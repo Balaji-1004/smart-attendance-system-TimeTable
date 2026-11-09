@@ -13,5 +13,6 @@ class TokenResponse(BaseModel):
     token_type: str = Field(default="bearer")
     role: str
     username: str
+    department_id: int
     faculty_id: Optional[int] = None
     student_id: Optional[int] = None

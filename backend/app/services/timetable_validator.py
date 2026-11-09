@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from app.models import FacultyAvailability, TimetableEntry
+from app.models import FacultyAvailability, Lab, TimetableEntry
 from app.models.enums import Period
 
 # Lunch cannot be scheduled and no Saturday/Sunday entries are not implemented as runtime checks here
@@ -174,16 +174,33 @@ def check_lab_room_consistency(subject_type, lab_id):
     return True, None
 
 
-def check_lab_concurrency(db, day, period, lab_total_count, pending_entries=None, exclude_entry_ids=None):
+def check_lab_concurrency(
+    db,
+    day,
+    period,
+    lab_total_count,
+    pending_entries=None,
+    exclude_entry_ids=None,
+    department_id=None,
+):
     day = _normalize_value(day)
     period = _normalize_value(period)
     excluded = set() if exclude_entry_ids is None else set(exclude_entry_ids)
 
-    existing_count = db.query(TimetableEntry).filter(
+    existing_query = db.query(TimetableEntry).filter(
         TimetableEntry.day == day,
         TimetableEntry.period == period,
         TimetableEntry.lab_id.isnot(None),
-    ).count()
+    )
+    department_lab_ids = None
+    if department_id is not None:
+        existing_query = existing_query.join(Lab, Lab.id == TimetableEntry.lab_id).filter(
+            Lab.department_id == department_id
+        )
+        department_lab_ids = {
+            lab_id for (lab_id,) in db.query(Lab.id).filter(Lab.department_id == department_id).all()
+        }
+    existing_count = existing_query.count()
 
     pending_count = 0
     for pending in _normalize_pending_entries(pending_entries):
@@ -194,6 +211,7 @@ def check_lab_concurrency(db, day, period, lab_total_count, pending_entries=None
             _normalize_value(_pending_get(pending, "day")) == day
             and _normalize_value(_pending_get(pending, "period")) == period
             and _pending_get(pending, "lab_id") is not None
+            and (department_lab_ids is None or _pending_get(pending, "lab_id") in department_lab_ids)
         ):
             pending_count += 1
 
@@ -241,7 +259,19 @@ def validate_single_entry(db, academic_year_id, subject_id, faculty_id, day, per
     return True, []
 
 
-def validate_lab_block(db, academic_year_id, subject_id, faculty_id, lab_id, day, start_period, lab_total_count, pending_entries=None, exclude_entry_ids=None):
+def validate_lab_block(
+    db,
+    academic_year_id,
+    subject_id,
+    faculty_id,
+    lab_id,
+    day,
+    start_period,
+    lab_total_count,
+    pending_entries=None,
+    exclude_entry_ids=None,
+    department_id=None,
+):
     periods = get_lab_block_periods(start_period)
     if periods is None:
         return False, ["Lab sessions must start at P1 or P4 to occupy 3 consecutive periods without crossing lunch or the day boundary."]
@@ -270,7 +300,15 @@ def validate_lab_block(db, academic_year_id, subject_id, faculty_id, lab_id, day
             seen.add(avail_reason)
             reasons.append(f"{period.value}: {avail_reason}")
 
-        concurrency_ok, concurrency_reason = check_lab_concurrency(db, day, period, lab_total_count, pending_entries=combined_pending, exclude_entry_ids=exclude_entry_ids)
+        concurrency_ok, concurrency_reason = check_lab_concurrency(
+            db,
+            day,
+            period,
+            lab_total_count,
+            pending_entries=combined_pending,
+            exclude_entry_ids=exclude_entry_ids,
+            department_id=department_id,
+        )
         if not concurrency_ok and concurrency_reason and concurrency_reason not in seen:
             seen.add(concurrency_reason)
             reasons.append(f"{period.value}: {concurrency_reason}")

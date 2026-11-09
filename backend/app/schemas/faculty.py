@@ -29,6 +29,7 @@ class FacultyResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    department_id: int | None = None
     name: str
     faculty_code: str
     email: str

@@ -5,6 +5,7 @@ const defaultAuthState = {
   token: '',
   username: '',
   role: '',
+  department_id: null,
   faculty_id: null,
   student_id: null,
 };
@@ -20,6 +21,7 @@ function readStoredAuth() {
         token: parsed.token || '',
         username: parsed.username || '',
         role: parsed.role || '',
+        department_id: parsed.department_id ?? null,
         faculty_id: parsed.faculty_id ?? null,
         student_id: parsed.student_id ?? null,
       };
@@ -69,6 +71,7 @@ export function AuthProvider({ children }) {
       token: response.data.access_token,
       username: response.data.username,
       role: response.data.role,
+      department_id: response.data.department_id ?? null,
       faculty_id: response.data.faculty_id ?? null,
       student_id: response.data.student_id ?? null,
     };

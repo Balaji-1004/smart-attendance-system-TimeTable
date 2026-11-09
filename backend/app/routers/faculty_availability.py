@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import exc
 from sqlalchemy.orm import Session
 
-from app.core.security import require_role
+from app.core.security import get_user_department_id, require_role
 from app.database.database import get_db
 from app.models import Faculty, FacultyAvailability, User
 from app.schemas.faculty_availability import FacultyAvailabilityCreate, FacultyAvailabilityResponse
@@ -26,8 +26,9 @@ def create_faculty_availability(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     faculty = db.query(Faculty).filter(Faculty.id == payload.faculty_id).first()
-    if faculty is None:
+    if faculty is None or faculty.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty not found")
 
     availability = FacultyAvailability(
@@ -52,7 +53,8 @@ def list_faculty_availability(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
-    query = db.query(FacultyAvailability)
+    department_id = get_user_department_id(db, current_user)
+    query = db.query(FacultyAvailability).join(Faculty, Faculty.id == FacultyAvailability.faculty_id).filter(Faculty.department_id == department_id)
     if faculty_id is not None:
         query = query.filter(FacultyAvailability.faculty_id == faculty_id)
     return query.order_by(FacultyAvailability.id.asc()).all()
@@ -64,8 +66,9 @@ def delete_faculty_availability(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     availability = db.query(FacultyAvailability).filter(FacultyAvailability.id == availability_id).first()
-    if availability is None:
+    if availability is None or availability.faculty.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty availability record not found")
 
     db.delete(availability)

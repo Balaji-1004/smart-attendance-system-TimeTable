@@ -8,7 +8,7 @@ from passlib.context import CryptContext
 
 from app.core.config import settings
 from app.database.database import get_db
-from app.models import User
+from app.models import Faculty, Student, User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -64,6 +64,32 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
     return user
+
+
+def get_user_department_id(db, user: User) -> int:
+    if user.role.value == "HOD":
+        if user.department_id is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has no department assigned")
+        return user.department_id
+
+    if user.role.value == "FACULTY":
+        faculty = db.query(Faculty).filter(Faculty.id == user.faculty_id).first()
+        if faculty is None or faculty.department_id is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has no department assigned")
+        return faculty.department_id
+
+    if user.role.value == "STUDENT":
+        student = db.query(Student).filter(Student.id == user.student_id).first()
+        if student is None or student.department_id is None:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has no department assigned")
+        return student.department_id
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account has no department assigned")
+
+
+def require_dept_match(db, user: User, record_department_id: int) -> None:
+    if get_user_department_id(db, user) != record_department_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
 
 def require_role(*allowed_roles: str):

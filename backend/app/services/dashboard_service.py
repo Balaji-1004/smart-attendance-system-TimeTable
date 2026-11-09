@@ -34,33 +34,70 @@ def _build_warnings(year_summaries: list[dict], students_without_face: list[dict
     return warnings
 
 
-def get_hod_dashboard(db: Session) -> dict:
+def get_hod_dashboard(db: Session, department_id: int) -> dict:
     today_value = date.today()
 
     counts = {
-        "academic_years": db.query(AcademicYear).count(),
-        "students": db.query(Student).count(),
-        "faculty": db.query(Faculty).count(),
-        "subjects": db.query(Subject).count(),
-        "labs": db.query(Lab).count(),
-        "students_face_registered": db.query(Student).filter(Student.face_registered.is_(True)).count(),
-        "students_face_not_registered": db.query(Student).filter(Student.face_registered.is_(False)).count(),
+        "academic_years": db.query(AcademicYear).filter(AcademicYear.department_id == department_id).count(),
+        "students": db.query(Student).filter(Student.department_id == department_id).count(),
+        "faculty": db.query(Faculty).filter(Faculty.department_id == department_id).count(),
+        "subjects": db.query(Subject)
+        .join(AcademicYear, AcademicYear.id == Subject.academic_year_id)
+        .filter(AcademicYear.department_id == department_id)
+        .count(),
+        "labs": db.query(Lab).filter(Lab.department_id == department_id).count(),
+        "students_face_registered": db.query(Student)
+        .filter(Student.department_id == department_id, Student.face_registered.is_(True))
+        .count(),
+        "students_face_not_registered": db.query(Student)
+        .filter(Student.department_id == department_id, Student.face_registered.is_(False))
+        .count(),
     }
 
+    student_count = (
+        db.query(func.count(Student.id))
+        .filter(Student.academic_year_id == AcademicYear.id)
+        .correlate(AcademicYear)
+        .scalar_subquery()
+    )
+    subject_count = (
+        db.query(func.count(Subject.id))
+        .filter(Subject.academic_year_id == AcademicYear.id)
+        .correlate(AcademicYear)
+        .scalar_subquery()
+    )
+    timetable_entries_count = (
+        db.query(func.count(TimetableEntry.id))
+        .filter(TimetableEntry.academic_year_id == AcademicYear.id)
+        .correlate(AcademicYear)
+        .scalar_subquery()
+    )
+    expected_weekly_periods = (
+        db.query(func.coalesce(func.sum(Subject.weekly_periods), 0))
+        .filter(Subject.academic_year_id == AcademicYear.id)
+        .correlate(AcademicYear)
+        .scalar_subquery()
+    )
+    face_registered_count = (
+        db.query(func.count(Student.id))
+        .filter(
+            Student.academic_year_id == AcademicYear.id,
+            Student.face_registered.is_(True),
+        )
+        .correlate(AcademicYear)
+        .scalar_subquery()
+    )
     year_rows = (
         db.query(
             AcademicYear.id.label("academic_year_id"),
             AcademicYear.name.label("name"),
-            func.count(func.distinct(Student.id)).label("student_count"),
-            func.count(func.distinct(Subject.id)).label("subject_count"),
-            func.count(func.distinct(TimetableEntry.id)).label("timetable_entries_count"),
-            func.coalesce(func.sum(Subject.weekly_periods), 0).label("expected_weekly_periods"),
-            func.count(func.distinct(case((Student.face_registered.is_(True), Student.id), else_=None))).label("face_registered_count"),
+            student_count.label("student_count"),
+            subject_count.label("subject_count"),
+            timetable_entries_count.label("timetable_entries_count"),
+            expected_weekly_periods.label("expected_weekly_periods"),
+            face_registered_count.label("face_registered_count"),
         )
-        .outerjoin(Student, Student.academic_year_id == AcademicYear.id)
-        .outerjoin(Subject, Subject.academic_year_id == AcademicYear.id)
-        .outerjoin(TimetableEntry, TimetableEntry.academic_year_id == AcademicYear.id)
-        .group_by(AcademicYear.id, AcademicYear.name)
+        .filter(AcademicYear.department_id == department_id)
         .order_by(AcademicYear.id.asc())
         .all()
     )
@@ -71,6 +108,8 @@ def get_hod_dashboard(db: Session) -> dict:
             func.sum(case((Attendance.status == AttendanceStatus.PRESENT, 1), else_=0)).label("present_count"),
             func.sum(case((Attendance.status == AttendanceStatus.ABSENT, 1), else_=0)).label("absent_count"),
         )
+        .join(AcademicYear, AcademicYear.id == Attendance.academic_year_id)
+        .filter(AcademicYear.department_id == department_id)
         .group_by(Attendance.academic_year_id)
         .all()
     )
@@ -104,7 +143,9 @@ def get_hod_dashboard(db: Session) -> dict:
             func.sum(case((AttendanceSession.status == SessionStatus.OPEN, 1), else_=0)).label("sessions_open"),
             func.sum(case((AttendanceSession.status == SessionStatus.CLOSED, 1), else_=0)).label("sessions_closed"),
         )
+        .join(AcademicYear, AcademicYear.id == AttendanceSession.academic_year_id)
         .filter(AttendanceSession.date == today_value)
+        .filter(AcademicYear.department_id == department_id)
         .one()
     )
     today_summary = {
@@ -119,7 +160,9 @@ def get_hod_dashboard(db: Session) -> dict:
             func.sum(case((Attendance.status == AttendanceStatus.PRESENT, 1), else_=0)).label("present_count"),
             func.sum(case((Attendance.status == AttendanceStatus.ABSENT, 1), else_=0)).label("absent_count"),
         )
+        .join(AcademicYear, AcademicYear.id == Attendance.academic_year_id)
         .filter(Attendance.date == today_value)
+        .filter(AcademicYear.department_id == department_id)
         .one()
     )
     today_summary["present_count"] = int(todays_attendance.present_count or 0)
@@ -137,6 +180,7 @@ def get_hod_dashboard(db: Session) -> dict:
         .join(Subject, Subject.id == AttendanceSession.subject_id)
         .join(Faculty, Faculty.id == AttendanceSession.faculty_id)
         .join(AcademicYear, AcademicYear.id == AttendanceSession.academic_year_id)
+        .filter(AcademicYear.department_id == department_id)
         .order_by(AttendanceSession.date.desc(), AttendanceSession.id.desc())
         .limit(5)
         .all()
@@ -147,6 +191,8 @@ def get_hod_dashboard(db: Session) -> dict:
             func.sum(case((Attendance.status == AttendanceStatus.PRESENT, 1), else_=0)).label("present_count"),
             func.sum(case((Attendance.status == AttendanceStatus.ABSENT, 1), else_=0)).label("absent_count"),
         )
+        .join(AcademicYear, AcademicYear.id == Attendance.academic_year_id)
+        .filter(AcademicYear.department_id == department_id)
         .group_by(Attendance.attendance_session_id)
         .all()
     )
@@ -183,6 +229,7 @@ def get_hod_dashboard(db: Session) -> dict:
         )
         .join(AcademicYear, AcademicYear.id == Student.academic_year_id)
         .outerjoin(Attendance, Attendance.student_id == Student.id)
+        .filter(Student.department_id == department_id)
         .group_by(Student.id, Student.name, Student.roll_number, AcademicYear.name)
         .having(func.count(Attendance.id) > 0)
         .all()
@@ -208,7 +255,7 @@ def get_hod_dashboard(db: Session) -> dict:
 
     students_without_face = (
         db.query(Student.id, Student.name, Student.roll_number)
-        .filter(Student.face_registered.is_(False))
+        .filter(Student.department_id == department_id, Student.face_registered.is_(False))
         .order_by(Student.id.asc())
         .all()
     )

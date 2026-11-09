@@ -6,12 +6,19 @@ import Sidebar from './Sidebar';
 
 const pageTitles = {
   '/hod/dashboard': 'HOD Dashboard',
+  '/academic-years': 'Academic Years',
+  '/faculty': 'Faculty',
+  '/subjects': 'Subjects',
+  '/labs': 'Labs',
+  '/students': 'Students',
+  '/faculty-availability': 'Faculty Availability',
   '/faculty/dashboard': 'Faculty Dashboard',
   '/student/dashboard': 'Student Dashboard',
   '/timetable': 'Academic Year Timetable',
   '/timetable/faculty': 'Faculty Timetable',
   '/timetable/department': 'Department Timetable',
   '/attendance': 'Attendance Session',
+  '/reports': 'Attendance Reports',
   '/face-registration': 'Face Registration',
 };
 

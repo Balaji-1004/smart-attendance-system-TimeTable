@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import exc
 from sqlalchemy.orm import Session
 
-from app.core.security import require_role
+from app.core.security import get_user_department_id, require_role
 from app.database.database import get_db
 from app.models import AcademicYear, Faculty, Subject, User
 from app.models.enums import SubjectType
@@ -27,13 +27,16 @@ def create_subject(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     academic_year = db.query(AcademicYear).filter(AcademicYear.id == payload.academic_year_id).first()
-    if academic_year is None:
+    if academic_year is None or academic_year.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
 
     faculty = db.query(Faculty).filter(Faculty.id == payload.faculty_id).first()
     if faculty is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty not found")
+    if faculty.department_id != department_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Faculty does not belong to this department.")
 
     subject = Subject(
         academic_year_id=payload.academic_year_id,
@@ -60,7 +63,8 @@ def list_subjects(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
-    query = db.query(Subject)
+    department_id = get_user_department_id(db, current_user)
+    query = db.query(Subject).join(AcademicYear, AcademicYear.id == Subject.academic_year_id).filter(AcademicYear.department_id == department_id)
     if academic_year_id is not None:
         query = query.filter(Subject.academic_year_id == academic_year_id)
     return query.order_by(Subject.created_at.desc()).all()
@@ -72,8 +76,11 @@ def get_subject(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     subject = db.query(Subject).filter(Subject.id == subject_id).first()
     if subject is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
+    if subject.academic_year.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
     return subject
 
@@ -85,19 +92,36 @@ def update_subject(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     subject = db.query(Subject).filter(Subject.id == subject_id).first()
-    if subject is None:
+    if subject is None or subject.academic_year.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
 
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
         return subject
 
+    if "academic_year_id" in updates and updates["academic_year_id"] is not None:
+        academic_year = (
+            db.query(AcademicYear)
+            .filter(AcademicYear.id == updates["academic_year_id"])
+            .first()
+        )
+        if academic_year is None or academic_year.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
+        subject.academic_year_id = academic_year.id
+
     if "faculty_id" in updates and updates["faculty_id"] is not None:
         faculty = db.query(Faculty).filter(Faculty.id == updates["faculty_id"]).first()
         if faculty is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty not found")
+        if faculty.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Faculty does not belong to this department.")
         subject.faculty_id = updates["faculty_id"]
+    elif "academic_year_id" in updates and updates["academic_year_id"] is not None:
+        faculty = db.query(Faculty).filter(Faculty.id == subject.faculty_id).first()
+        if faculty is None or faculty.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Faculty does not belong to this department.")
 
     for field in ("name", "code"):
         if field in updates and updates[field] is not None:
@@ -124,8 +148,9 @@ def delete_subject(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     subject = db.query(Subject).filter(Subject.id == subject_id).first()
-    if subject is None:
+    if subject is None or subject.academic_year.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
 
     try:

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.security import require_role
+from app.core.security import get_user_department_id, require_role
 from app.database.database import get_db
 from app.models import AcademicYear, Faculty, Lab, Subject, TimetableEntry, User
 from app.schemas.timetable import (
@@ -79,8 +79,9 @@ def generate_timetable_route(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     academic_year = db.query(AcademicYear).filter(AcademicYear.id == payload.academic_year_id).first()
-    if academic_year is None:
+    if academic_year is None or academic_year.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
 
     result = generate_timetable(db, payload.academic_year_id)
@@ -93,8 +94,9 @@ def get_timetable_for_year(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
+    department_id = get_user_department_id(db, current_user)
     academic_year = db.query(AcademicYear).filter(AcademicYear.id == year_id).first()
-    if academic_year is None:
+    if academic_year is None or academic_year.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
 
     entries = (
@@ -115,8 +117,9 @@ def get_timetable_for_faculty(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
+    department_id = get_user_department_id(db, current_user)
     faculty = db.query(Faculty).filter(Faculty.id == faculty_id).first()
-    if faculty is None:
+    if faculty is None or faculty.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty not found")
 
     if current_user.role.value == "FACULTY" and current_user.faculty_id != faculty_id:
@@ -139,12 +142,14 @@ def get_department_timetable(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD")),
 ):
+    department_id = get_user_department_id(db, current_user)
     entries = (
         db.query(TimetableEntry)
         .join(Subject, Subject.id == TimetableEntry.subject_id)
         .join(Faculty, Faculty.id == TimetableEntry.faculty_id)
         .join(AcademicYear, AcademicYear.id == TimetableEntry.academic_year_id)
         .outerjoin(Lab, Lab.id == TimetableEntry.lab_id)
+        .filter(AcademicYear.department_id == department_id)
         .order_by(AcademicYear.id, TimetableEntry.day, TimetableEntry.period)
         .all()
     )
@@ -158,8 +163,9 @@ def update_timetable_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
+    department_id = get_user_department_id(db, current_user)
     entry = db.query(TimetableEntry).filter(TimetableEntry.id == entry_id).first()
-    if entry is None:
+    if entry is None or entry.academic_year.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Timetable entry not found")
 
     if current_user.role.value == "FACULTY" and entry.faculty_id != current_user.faculty_id:
@@ -172,6 +178,11 @@ def update_timetable_entry(
     new_day = updates.get("day", entry.day)
     new_period = updates.get("period", entry.period)
     new_lab_id = updates.get("lab_id", entry.lab_id)
+
+    if new_lab_id is not None:
+        lab = db.query(Lab).filter(Lab.id == new_lab_id).first()
+        if lab is None or lab.department_id != department_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lab not found")
 
     if new_day == entry.day and new_period == entry.period and new_lab_id == entry.lab_id:
         return _entry_to_response(entry)
@@ -206,8 +217,9 @@ def delete_timetable_entry(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
+    department_id = get_user_department_id(db, current_user)
     entry = db.query(TimetableEntry).filter(TimetableEntry.id == entry_id).first()
-    if entry is None:
+    if entry is None or entry.academic_year.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Timetable entry not found")
 
     if current_user.role.value == "FACULTY" and entry.faculty_id != current_user.faculty_id:

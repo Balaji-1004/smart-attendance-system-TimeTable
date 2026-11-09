@@ -33,7 +33,7 @@ class Student(Base):
 
     # Relationships
     academic_year = relationship("AcademicYear", back_populates="students")
-    department = relationship("Department")
+    department = relationship("Department", back_populates="students")
 
     attendance_records = relationship("Attendance", back_populates="student")
     face_data = relationship("FaceData", back_populates="student", uselist=False)
