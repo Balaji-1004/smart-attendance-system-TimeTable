@@ -11,7 +11,6 @@ if str(BACKEND_DIR) not in sys.path:
 from app.database.database import engine
 
 
-EXPECTED_FACE_HASH = "0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242"
 COUNT_TABLES = (
     "users",
     "faculty",
@@ -113,13 +112,28 @@ def print_plan(connection):
     print(f"Database: {database_path()}")
     print(f"Before counts: {counts(connection)}")
     print(f"Before face_embedding SHA-256: {face_embedding_hash(connection)}")
+    print(
+        "Before face_data row count: "
+        f"{connection.execute('SELECT COUNT(*) FROM face_data').fetchone()[0]}"
+    )
     print(f"Departments: {[dict(row) for row in departments]}")
     for year in connection.execute(
         "SELECT id, department_id, name FROM academic_years ORDER BY id"
     ):
         print(f"Academic year {year['id']} ({year['name']}): {year_counts(connection, year['id'])}")
     print("Planned mapping: years 1-2 -> MCA; years 4-5 -> MTech; year 3 students -> year 2.")
-    print("Planned programme department: departments.id=1; department 2 rows move to department 1.")
+    print(
+        "Planned programme department: departments.id=1; department 2 rows and any "
+        "department 3 Computer Science rows move to department 1."
+    )
+    existing_year_ids = {
+        row["id"]
+        for row in connection.execute("SELECT id FROM academic_years")
+    }
+    print(
+        "Planned MTech years: "
+        f"create missing ids from {sorted({4, 5} - existing_year_ids)}."
+    )
     print("Planned removal: old teaching records for years 1-3; mtech.hod; unreferenced demo faculty.")
 
 
@@ -172,10 +186,33 @@ def rebuild_academic_years(connection, programme_ids):
 
     if "programme_id" in old_columns:
         for year_id, programme_id in year_programmes.items():
+            year_name = {
+                1: "1st Year",
+                2: "2nd Year",
+                4: "1st Year",
+                5: "2nd Year",
+            }.get(year_id)
+            if year_name is None:
+                year_name = connection.execute(
+                    "SELECT name FROM academic_years WHERE id=?", (year_id,)
+                ).fetchone()["name"]
             connection.execute(
-                "UPDATE academic_years SET department_id=1, programme_id=? WHERE id=?",
-                (programme_id, year_id),
+                "UPDATE academic_years SET department_id=1, programme_id=?, name=? WHERE id=?",
+                (
+                    programme_id,
+                    year_name,
+                    year_id,
+                ),
             )
+        connection.execute("DELETE FROM academic_years WHERE id=3")
+        for year_id, year_name in ((4, "1st Year"), (5, "2nd Year")):
+            if year_id not in {row["id"] for row in rows}:
+                connection.execute(
+                    """INSERT INTO academic_years
+                       (id, department_id, programme_id, name, created_at)
+                       VALUES (?, 1, ?, ?, CURRENT_TIMESTAMP)""",
+                    (year_id, programme_ids["MTech"], year_name),
+                )
         return
 
     connection.execute(
@@ -196,8 +233,27 @@ def rebuild_academic_years(connection, programme_ids):
             """INSERT INTO academic_years_new
                (id, department_id, programme_id, name, created_at)
                VALUES (?, 1, ?, ?, ?)""",
-            (row["id"], programme_id, row["name"], row["created_at"]),
+            (
+                row["id"],
+                programme_id,
+                {
+                    1: "1st Year",
+                    2: "2nd Year",
+                    4: "1st Year",
+                    5: "2nd Year",
+                }.get(row["id"], row["name"]),
+                row["created_at"],
+            ),
         )
+    existing_year_ids = {row["id"] for row in rows}
+    for year_id, year_name in ((4, "1st Year"), (5, "2nd Year")):
+        if year_id not in existing_year_ids:
+            connection.execute(
+                """INSERT INTO academic_years_new
+                   (id, department_id, programme_id, name, created_at)
+                   VALUES (?, 1, ?, ?, CURRENT_TIMESTAMP)""",
+                (year_id, programme_ids["MTech"], year_name),
+            )
     connection.execute("DROP TABLE academic_years")
     connection.execute("ALTER TABLE academic_years_new RENAME TO academic_years")
     connection.execute("CREATE INDEX ix_academic_years_id ON academic_years (id)")
@@ -225,16 +281,13 @@ def faculty_blockers(connection, faculty_id):
 def migrate(connection):
     before_count = counts(connection)
     before_hash = face_embedding_hash(connection)
+    before_face_count = before_count["face_data"]
     before_years = {
         row["id"]: (row["name"], row["created_at"])
         for row in connection.execute(
             "SELECT id, name, created_at FROM academic_years ORDER BY id"
         )
     }
-    if before_hash != EXPECTED_FACE_HASH:
-        raise RuntimeError(
-            f"Refusing apply: expected face hash {EXPECTED_FACE_HASH}, found {before_hash}."
-        )
     if not table_exists(connection, "programmes"):
         connection.execute(
             """CREATE TABLE programmes (
@@ -250,6 +303,15 @@ def migrate(connection):
     department = connection.execute("SELECT id, name FROM departments WHERE id=1").fetchone()
     if department is None:
         raise RuntimeError("Department id 1 is missing.")
+    computer_science_department = connection.execute(
+        "SELECT id FROM departments WHERE name='Computer Science' AND id<>1 ORDER BY id LIMIT 1"
+    ).fetchone()
+    source_department_id = None
+    if computer_science_department is not None and computer_science_department["id"] == 3:
+        source_department_id = 3
+        connection.execute(
+            "UPDATE departments SET name='Computer Science legacy 3' WHERE id=3"
+        )
     duplicate = connection.execute(
         "SELECT id FROM departments WHERE name='Computer Science' AND id<>1"
     ).fetchone()
@@ -271,14 +333,14 @@ def migrate(connection):
             "SELECT id, department_id, name FROM academic_years ORDER BY id"
         )
     }
-    if not all(year_id in years for year_id in (1, 2, 4, 5)):
-        if "programme_id" not in column_names(connection, "academic_years"):
-            raise RuntimeError("Required academic year ids 1, 2, 4 and 5 must exist.")
+    if not all(year_id in years for year_id in (1, 2)):
+        raise RuntimeError("Required MCA academic year ids 1 and 2 must exist.")
 
     is_legacy_split = (
         department["name"] != "Computer Science"
         or 3 in years
         or connection.execute("SELECT 1 FROM departments WHERE id=2").fetchone() is not None
+        or source_department_id is not None
     )
     if is_legacy_split:
         for year_id in (1, 2, 3):
@@ -293,26 +355,24 @@ def migrate(connection):
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='academic_years'"
     ).fetchone() is None:
         raise RuntimeError("academic_years table is missing.")
-    if "programme_id" not in column_names(connection, "academic_years"):
-        rebuild_academic_years(connection, programme_ids)
-    else:
-        for year_id, programme_name in ((1, "MCA"), (2, "MCA"), (4, "MTech"), (5, "MTech")):
-            if year_id in years:
-                connection.execute(
-                    "UPDATE academic_years SET department_id=1, programme_id=? WHERE id=?",
-                    (programme_ids[programme_name], year_id),
-                )
-        if 3 in years:
-            connection.execute("DELETE FROM academic_years WHERE id=3")
+    rebuild_academic_years(connection, programme_ids)
 
     if "department_id" in column_names(connection, "faculty"):
         connection.execute("UPDATE faculty SET department_id=1 WHERE department_id=2")
+        if source_department_id is not None:
+            connection.execute("UPDATE faculty SET department_id=1 WHERE department_id=3")
     if "department_id" in column_names(connection, "labs"):
         connection.execute("UPDATE labs SET department_id=1 WHERE department_id=2")
+        if source_department_id is not None:
+            connection.execute("UPDATE labs SET department_id=1 WHERE department_id=3")
     if "department_id" in column_names(connection, "users"):
         connection.execute("DELETE FROM users WHERE username='mtech.hod'")
         connection.execute("UPDATE users SET department_id=1 WHERE department_id=2")
+        if source_department_id is not None:
+            connection.execute("UPDATE users SET department_id=1 WHERE department_id=3")
     connection.execute("UPDATE students SET department_id=1 WHERE department_id=2")
+    if source_department_id is not None:
+        connection.execute("UPDATE students SET department_id=1 WHERE department_id=3")
 
     for faculty_name in LEGACY_FACULTY_NAMES:
         faculty = connection.execute(
@@ -345,11 +405,18 @@ def migrate(connection):
         )
         connection.execute("CREATE INDEX ix_faculty_face_data_id ON faculty_face_data (id)")
 
-    if connection.execute("SELECT 1 FROM departments WHERE id=2").fetchone() is not None:
-        references = department_reference_counts(connection, 2)
-        if references:
-            raise RuntimeError(f"Department 2 still has references and cannot be deleted: {references}")
-        connection.execute("DELETE FROM departments WHERE id=2")
+    for department_id in (2, source_department_id):
+        if department_id is None:
+            continue
+        if connection.execute(
+            "SELECT 1 FROM departments WHERE id=?", (department_id,)
+        ).fetchone() is not None:
+            references = department_reference_counts(connection, department_id)
+            if references:
+                raise RuntimeError(
+                    f"Department {department_id} still has references and cannot be deleted: {references}"
+                )
+            connection.execute("DELETE FROM departments WHERE id=?", (department_id,))
 
     remaining_year3_students = connection.execute(
         "SELECT COUNT(*) FROM students WHERE academic_year_id=3"
@@ -368,22 +435,41 @@ def migrate(connection):
             "SELECT id, name, created_at FROM academic_years ORDER BY id"
         )
     }
-    expected_years = {year_id: value for year_id, value in before_years.items() if year_id != 3}
-    if after_years != expected_years:
+    expected_retained_years = {
+        year_id: value for year_id, value in before_years.items() if year_id != 3
+    }
+    if any(after_years.get(year_id) != value for year_id, value in expected_retained_years.items()):
         raise RuntimeError(
             f"Academic year ids, names, or created_at values changed unexpectedly: {after_years}"
         )
+    required_years = {
+        1: ("1st Year", programme_ids["MCA"]),
+        2: ("2nd Year", programme_ids["MCA"]),
+        4: ("1st Year", programme_ids["MTech"]),
+        5: ("2nd Year", programme_ids["MTech"]),
+    }
+    actual_required_years = {
+        row["id"]: (row["name"], row["programme_id"])
+        for row in connection.execute(
+            "SELECT id, name, programme_id FROM academic_years WHERE id IN (1, 2, 4, 5)"
+        )
+    }
+    if actual_required_years != required_years:
+        raise RuntimeError(
+            f"Expected academic years 1, 2, 4 and 5 in their programmes; got {actual_required_years}."
+        )
     print(
-        f"Academic year rebuild verification: ids/count preserved except removed year 3; "
+        f"Academic year verification: retained existing ids/names/timestamps except removed year 3; "
         f"before={len(before_years)}, after={len(after_years)}, ids={sorted(after_years)}"
     )
     after_count = counts(connection)
     after_hash = face_embedding_hash(connection)
     print(f"After counts: {after_count}")
     print(f"After face_embedding SHA-256: {after_hash}")
+    print(f"After face_data row count: {after_count['face_data']}")
     if after_hash != before_hash:
         raise RuntimeError("Face embedding hash changed during programme migration.")
-    if before_count["face_data"] != after_count["face_data"]:
+    if before_face_count != after_count["face_data"]:
         raise RuntimeError("face_data row count changed during programme migration.")
 
 

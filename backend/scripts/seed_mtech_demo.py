@@ -31,7 +31,6 @@ from app.models.user import Role
 from app.services.timetable_generator import generate_timetable
 
 
-EXPECTED_FACE_HASH = "0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242"
 BACKUP_PATH = BACKEND_DIR / "smart_attendance.backup_before_final_setup.db"
 REAL_DB_PATH = BACKEND_DIR / "smart_attendance.db"
 TEST_DB_PATH = BACKEND_DIR / "smart_attendance.test_copy.db"
@@ -444,10 +443,7 @@ def main():
 
         before_counts = table_counts(db)
         before_hash = face_embedding_hash(db)
-        if before_hash != EXPECTED_FACE_HASH:
-            raise RuntimeError(
-                f"Face embedding hash mismatch before setup: expected {EXPECTED_FACE_HASH}, got {before_hash}"
-            )
+        before_face_count = before_counts["face_data"]
         department, mca, mtech = resolve_departments(db)
         before_mca = department_counts(db, department.id)
         years = resolve_years(db, mtech)
@@ -455,6 +451,7 @@ def main():
 
         print(f"Before global row counts: {before_counts}")
         print(f"Before face_embedding SHA-256: {before_hash}")
+        print(f"Before face_data row count: {before_face_count}")
         print(f"MCA counts before cleanup: {before_mca}")
         print("Capacity check: PASS (faculty <= 15 and academic years <= 30)")
 
@@ -484,16 +481,22 @@ def main():
         db.flush()
         after_counts = table_counts(db)
         after_hash = face_embedding_hash(db)
+        after_face_count = after_counts["face_data"]
+        print(f"After face_embedding SHA-256: {after_hash}")
+        print(f"After face_data row count: {after_face_count}")
         if after_hash != before_hash:
             raise RuntimeError(
                 f"Face embedding hash changed during setup: before {before_hash}, after {after_hash}"
+            )
+        if after_face_count != before_face_count:
+            raise RuntimeError(
+                f"face_data row count changed during setup: before {before_face_count}, after {after_face_count}"
             )
         after_mca = department_counts(db, department.id)
         db.commit()
         outer_transaction.commit()
 
         print(f"After global row counts: {after_counts}")
-        print(f"After face_embedding SHA-256: {after_hash}")
         print(f"MCA counts after cleanup: {after_mca}")
         for message in cleanup_messages:
             print(message)

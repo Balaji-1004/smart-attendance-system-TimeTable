@@ -1,3 +1,4 @@
+import hashlib
 import re
 import secrets
 import sys
@@ -8,10 +9,11 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.core.security import hash_password
-from app.database.database import SessionLocal
-from app.models import AcademicYear, Faculty, Programme, Subject, User
+from app.database.database import engine
+from app.models import AcademicYear, FaceData, Faculty, Programme, Subject, User
 from app.models.enums import SubjectType
 from app.models.user import Role
 from app.services.timetable_generator import generate_timetable
@@ -38,10 +40,31 @@ def username_for(name):
     return re.sub(r"[^a-z0-9]+", ".", name.lower()).strip(".")
 
 
+def face_embedding_hash(db):
+    digest = hashlib.sha256()
+    rows = db.query(FaceData.face_embedding).order_by(FaceData.student_id).all()
+    for (embedding,) in rows:
+        if embedding is None:
+            raise RuntimeError("A face_data.face_embedding value is NULL.")
+        digest.update(bytes(embedding))
+    return digest.hexdigest()
+
+
 def main():
-    db = SessionLocal()
+    connection = engine.connect()
+    outer_transaction = connection.begin()
+    db = Session(
+        bind=connection,
+        join_transaction_mode="create_savepoint",
+        expire_on_commit=False,
+    )
     credentials = []
     try:
+        before_face_hash = face_embedding_hash(db)
+        before_face_count = db.query(FaceData).count()
+        print(f"Before face_embedding SHA-256: {before_face_hash}")
+        print(f"Before face_data row count: {before_face_count}")
+
         department_id = 1
         department = db.query(Programme).filter(
             Programme.department_id == department_id,
@@ -159,7 +182,7 @@ def main():
                     faculty_id=faculty_by_name[faculty_name].id,
                 )
             )
-        db.commit()
+        db.flush()
         print(f"Subjects inserted: {len(additions)}; already present: {len(SUBJECTS) - len(additions)}")
 
         for year_name in ("1st Year", "2nd Year"):
@@ -170,14 +193,30 @@ def main():
                 f"feasibility_warnings={result['feasibility_warnings']}"
             )
 
+        db.flush()
+        after_face_hash = face_embedding_hash(db)
+        after_face_count = db.query(FaceData).count()
+        print(f"After face_embedding SHA-256: {after_face_hash}")
+        print(f"After face_data row count: {after_face_count}")
+        if after_face_hash != before_face_hash:
+            raise RuntimeError("Face embedding hash changed during MCA seeding.")
+        if after_face_count != before_face_count:
+            raise RuntimeError("face_data row count changed during MCA seeding.")
+
+        db.commit()
+        outer_transaction.commit()
+        print("MCA seed transaction: COMMITTED")
         print("Credentials (new faculty users only; printed once):")
         for username, password in credentials:
             print(f"{username}: {password}")
     except Exception:
         db.rollback()
+        if outer_transaction.is_active:
+            outer_transaction.rollback()
         raise
     finally:
         db.close()
+        connection.close()
 
 
 if __name__ == "__main__":

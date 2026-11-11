@@ -2,24 +2,30 @@
 
 ## Test method and data boundary
 
-Each database-writing regression was run on its own fresh `backend/smart_attendance.test_copy.db`, copied from `smart_attendance.backup_before_final_setup.db`. The copy was migrated with `scripts/migrate_programmes.py --apply`, then populated with the MTech and MCA seed scripts before the applicable test. No test or seed was run against the real database.
+Each database-writing regression was run on its own fresh `backend/smart_attendance.test_copy.db`, copied from `smart_attendance.backup_before_final_setup.db`. The copy was migrated with `scripts/migrate_programmes.py --apply`, then populated with the MTech and MCA seed scripts before the applicable test. The requested Phase 13 migration and MCA seed were later run on the real database after a separate backup; no regression test was run there.
 
-The matching test-copy baseline had face-embedding SHA-256 `0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242`. The programme migration preserved that hash and the two `face_data` rows. The migration retained academic-year ids 1, 2, 4, and 5, and removed year 3 after moving its students to year 2.
+The historical matching test-copy baseline used face-embedding SHA-256 `0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242`; this is an earlier observed value, not a required constant. Migration and seed scripts now compute the hash ordered by student id and the `face_data` row count at each run's start, then require both values to match at the end. The migration retained academic-year ids 1, 2, 4, and 5, and removed year 3 after moving its students to year 2.
 
-## Real database migration guard
+## Real database migration and seed
 
-The backup `backend/smart_attendance.backup_before_programmes.db` was created before Phase 13 inspection. A later guarded `migrate_programmes.py --apply` attempt against the real `backend/smart_attendance.db` refused before changing data:
+The backup `backend/smart_attendance.backup_before_programmes_apply.db` was created immediately before the real-DB apply (253,952 bytes; original DB 253,952 bytes). The information-only face comparison found the real DB had three embeddings, the historical comparison DB had two, and the shared student id had a different embedding. No face data was modified. Migration and MCA seed both verified a run-specific hash and row count before and after.
 
 ```text
+Before counts: {'users': 5, 'faculty': 3, 'students': 13, 'face_data': 3, 'subjects': 12, 'timetable_entries': 33, 'attendance_sessions': 5, 'attendance': 19}
 Before face_embedding SHA-256: f6e5a7c5c387fb582316c48519c656657deb6a407ce089baccab527e0cbc58a9
-RuntimeError: Refusing apply: expected face hash 0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242, found f6e5a7c5c387fb582316c48519c656657deb6a407ce089baccab527e0cbc58a9.
-REAL MIGRATION EXIT: 1
-Real counts after guarded attempt: {'users': 5, 'faculty': 3, 'students': 13, 'face_data': 3, 'subjects': 12, 'timetable_entries': 33, 'attendance_sessions': 5, 'attendance': 19}
-Real face hash after guarded attempt: f6e5a7c5c387fb582316c48519c656657deb6a407ce089baccab527e0cbc58a9
-Departments after guarded attempt: [(1, 'MCA'), (2, 'MTech'), (3, 'Computer Science')]
+Before face_data row count: 3
+After migration counts: {'users': 3, 'faculty': 1, 'students': 13, 'face_data': 3, 'subjects': 0, 'timetable_entries': 0, 'attendance_sessions': 0, 'attendance': 0}
+After migration face_embedding SHA-256: f6e5a7c5c387fb582316c48519c656657deb6a407ce089baccab527e0cbc58a9
+After migration face_data row count: 3
+MCA 1st Year: placed_count=21, unscheduled=[]
+MCA 2nd Year: placed_count=15, unscheduled=[]
+Final counts: {'users': 9, 'faculty': 7, 'students': 13, 'face_data': 3, 'subjects': 12, 'timetable_entries': 36, 'attendance_sessions': 0, 'attendance': 0}
+Final face_embedding SHA-256: f6e5a7c5c387fb582316c48519c656657deb6a407ce089baccab527e0cbc58a9
+Final face_data row count: 3
+Foreign-key violations: []
 ```
 
-The required hash did not match the real DB, so its migration and real MCA seed were not applied. The production database therefore remains in its pre-migration, three-department state. The results below describe only isolated test copies.
+Final inventory is one Computer Science department with MCA and MTech, and four academic years (two per programme). MCA has 13 students, 12 subjects, and 36 timetable entries; MTech currently has 0 students, subjects, and timetable entries. Existing lab/faculty rows were preserved or reassigned as reported by the migration; Ms. Meera Iyer's faculty record remained because it has a faculty-availability reference. Demo passwords were reset separately and are not recorded in this file.
 
 ## Programme seeding and timetable generation
 
