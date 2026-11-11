@@ -20,6 +20,7 @@ from app.models import (
     Faculty,
     FacultyAvailability,
     Lab,
+    Programme,
     Student,
     Subject,
     TimetableEntry,
@@ -33,6 +34,7 @@ from app.services.timetable_generator import generate_timetable
 EXPECTED_FACE_HASH = "0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242"
 BACKUP_PATH = BACKEND_DIR / "smart_attendance.backup_before_final_setup.db"
 REAL_DB_PATH = BACKEND_DIR / "smart_attendance.db"
+TEST_DB_PATH = BACKEND_DIR / "smart_attendance.test_copy.db"
 
 FACULTY_SPECS = (
     ("FAC-MT-01", "Dr. Kavya Nair", "kavya.nair", "kavya.nair@demo.invalid"),
@@ -147,22 +149,32 @@ def department_counts(db, department_id):
 
 def check_real_database():
     database_path = Path(engine.url.database).resolve()
+    if database_path == TEST_DB_PATH.resolve():
+        return
     if database_path != REAL_DB_PATH.resolve():
         raise RuntimeError(
-            f"Refusing to run: DATABASE_URL must point to {REAL_DB_PATH}, got {database_path}"
+            f"Refusing to run: DATABASE_URL must point to {REAL_DB_PATH} "
+            f"or {TEST_DB_PATH}, got {database_path}"
         )
     if not BACKUP_PATH.is_file():
         raise RuntimeError(f"Required backup is missing: {BACKUP_PATH}")
 
 
 def resolve_departments(db):
-    mca = db.query(Department).filter(Department.name == "MCA").first()
-    mtech = db.query(Department).filter(Department.name == "MTech").first()
-    if mca is None or mca.id != 1:
-        raise RuntimeError("Expected department MCA with id 1.")
-    if mtech is None or mtech.id != 2:
-        raise RuntimeError("Expected department MTech with id 2.")
-    return mca, mtech
+    department = db.query(Department).filter(Department.name == "Computer Science").first()
+    if department is None or department.id != 1:
+        raise RuntimeError("Expected department Computer Science with id 1.")
+    mca = db.query(Programme).filter(
+        Programme.department_id == department.id,
+        Programme.name == "MCA",
+    ).first()
+    mtech = db.query(Programme).filter(
+        Programme.department_id == department.id,
+        Programme.name == "MTech",
+    ).first()
+    if mca is None or mtech is None:
+        raise RuntimeError("Expected MCA and MTech programmes in department 1.")
+    return department, mca, mtech
 
 
 def resolve_years(db, mtech):
@@ -171,7 +183,7 @@ def resolve_years(db, mtech):
         year = (
             db.query(AcademicYear)
             .filter(
-                AcademicYear.department_id == mtech.id,
+                AcademicYear.programme_id == mtech.id,
                 AcademicYear.name == year_name,
             )
             .first()
@@ -182,11 +194,11 @@ def resolve_years(db, mtech):
     return years
 
 
-def check_capacity(db, mtech, years):
+def check_capacity(db, department, mtech, years):
     faculty_by_code = {}
     for code, _, _, email in FACULTY_SPECS:
         faculty = db.query(Faculty).filter(Faculty.faculty_code == code).first()
-        if faculty is not None and faculty.department_id != mtech.id:
+        if faculty is not None and faculty.department_id != department.id:
             raise RuntimeError(f"Faculty code {code} already belongs to another department.")
         if faculty is None:
             email_owner = db.query(Faculty).filter(Faculty.email == email).first()
@@ -199,7 +211,7 @@ def check_capacity(db, mtech, years):
     mtech_year_ids = [
         row[0]
         for row in db.query(AcademicYear.id)
-        .filter(AcademicYear.department_id == mtech.id)
+        .filter(AcademicYear.programme_id == mtech.id)
         .all()
     ]
     year_totals = dict(
@@ -211,7 +223,7 @@ def check_capacity(db, mtech, years):
     faculty_totals = dict(
         db.query(Subject.faculty_id, func.coalesce(func.sum(Subject.weekly_periods), 0))
         .join(Faculty, Faculty.id == Subject.faculty_id)
-        .filter(Faculty.department_id == mtech.id)
+        .filter(Faculty.department_id == department.id)
         .group_by(Subject.faculty_id)
         .all()
     )
@@ -225,7 +237,7 @@ def check_capacity(db, mtech, years):
         )
         if existing is not None:
             assigned_faculty = db.query(Faculty).filter(Faculty.id == existing.faculty_id).first()
-            if assigned_faculty is None or assigned_faculty.department_id != mtech.id:
+            if assigned_faculty is None or assigned_faculty.department_id != department.id:
                 raise RuntimeError(f"Existing MTech subject {code} uses a faculty outside MTech.")
             continue
         target_faculty = faculty_by_code[faculty_code]
@@ -243,13 +255,13 @@ def check_capacity(db, mtech, years):
         raise RuntimeError("Capacity check failed: " + "; ".join(failures))
 
 
-def ensure_faculty(db, mtech, credentials):
+def ensure_faculty(db, department, credentials):
     faculties = {}
     for code, name, username, email in FACULTY_SPECS:
         faculty = db.query(Faculty).filter(Faculty.faculty_code == code).first()
         if faculty is None:
             faculty = Faculty(
-                department_id=mtech.id,
+                department_id=department.id,
                 name=name,
                 faculty_code=code,
                 email=email,
@@ -264,7 +276,7 @@ def ensure_faculty(db, mtech, credentials):
                 username=username,
                 password_hash=hash_password(password),
                 role=Role.FACULTY,
-                department_id=mtech.id,
+                department_id=department.id,
                 faculty_id=faculty.id,
             )
             db.add(user)
@@ -275,12 +287,12 @@ def ensure_faculty(db, mtech, credentials):
     return faculties
 
 
-def ensure_labs(db, mtech):
+def ensure_labs(db, department):
     for code, name in LAB_SPECS:
         lab = db.query(Lab).filter(Lab.lab_code == code).first()
         if lab is None:
-            db.add(Lab(department_id=mtech.id, lab_code=code, name=name))
-        elif lab.department_id != mtech.id:
+            db.add(Lab(department_id=department.id, lab_code=code, name=name))
+        elif lab.department_id != department.id:
             raise RuntimeError(f"Lab code {code} already belongs to another department.")
     db.flush()
 
@@ -311,7 +323,7 @@ def ensure_subjects(db, years, faculties):
     db.flush()
 
 
-def ensure_students(db, mtech, years, credentials):
+def ensure_students(db, department, years, credentials):
     for year_name, roll_number, name, email, username in STUDENT_SPECS:
         student = db.query(Student).filter(Student.roll_number == roll_number).first()
         if student is None:
@@ -323,13 +335,13 @@ def ensure_students(db, mtech, years, credentials):
                 name=name,
                 email=email,
                 academic_year_id=years[year_name].id,
-                department_id=mtech.id,
+                department_id=department.id,
                 face_registered=False,
             )
             db.add(student)
             db.flush()
         elif (
-            student.department_id != mtech.id
+            student.department_id != department.id
             or student.academic_year_id != years[year_name].id
         ):
             raise RuntimeError(f"Student roll number {roll_number} belongs to another department/year.")
@@ -343,7 +355,7 @@ def ensure_students(db, mtech, years, credentials):
                 username=username,
                 password_hash=hash_password(password),
                 role=Role.STUDENT,
-                department_id=mtech.id,
+                department_id=department.id,
                 student_id=student.id,
             )
             db.add(user)
@@ -436,10 +448,10 @@ def main():
             raise RuntimeError(
                 f"Face embedding hash mismatch before setup: expected {EXPECTED_FACE_HASH}, got {before_hash}"
             )
-        mca, mtech = resolve_departments(db)
-        before_mca = department_counts(db, mca.id)
+        department, mca, mtech = resolve_departments(db)
+        before_mca = department_counts(db, department.id)
         years = resolve_years(db, mtech)
-        check_capacity(db, mtech, years)
+        check_capacity(db, department, mtech, years)
 
         print(f"Before global row counts: {before_counts}")
         print(f"Before face_embedding SHA-256: {before_hash}")
@@ -447,10 +459,10 @@ def main():
         print("Capacity check: PASS (faculty <= 15 and academic years <= 30)")
 
         cleanup_messages = clean_mca_accounts(db)
-        faculties = ensure_faculty(db, mtech, credentials)
-        ensure_labs(db, mtech)
+        faculties = ensure_faculty(db, department, credentials)
+        ensure_labs(db, department)
         ensure_subjects(db, years, faculties)
-        ensure_students(db, mtech, years, credentials)
+        ensure_students(db, department, years, credentials)
 
         generation_results = {}
         for year_name, year in years.items():
@@ -476,7 +488,7 @@ def main():
             raise RuntimeError(
                 f"Face embedding hash changed during setup: before {before_hash}, after {after_hash}"
             )
-        after_mca = department_counts(db, mca.id)
+        after_mca = department_counts(db, department.id)
         db.commit()
         outer_transaction.commit()
 

@@ -1,6 +1,6 @@
 # Entity relationship diagram
 
-The diagram reflects the SQLAlchemy models under `backend/app/models/`. `PK`, `FK`, and `UQ` identify primary keys, foreign keys, and unique columns/constraints. Nullable foreign keys are marked `?`.
+This diagram reflects the SQLAlchemy models in `backend/app/models/`. `PK`, `FK`, and `UQ` identify primary keys, foreign keys, and unique columns or constraints. A `?` marks a nullable foreign key.
 
 ```mermaid
 erDiagram
@@ -8,12 +8,20 @@ erDiagram
         int id PK
         string name UQ
     }
-    ACADEMIC_YEARS {
+    PROGRAMMES {
         int id PK
         int department_id FK
         string name
         datetime created_at
-        string uq_department_year "UQ department_id + name"
+        string uq_department_programme "UQ department_id + name"
+    }
+    ACADEMIC_YEARS {
+        int id PK
+        int department_id FK
+        int programme_id FK
+        string name
+        datetime created_at
+        string uq_programme_year "UQ programme_id + name"
     }
     USERS {
         int id PK
@@ -28,10 +36,18 @@ erDiagram
     FACULTY {
         int id PK
         int department_id FK "nullable"
+        boolean face_registered
         string name
         string faculty_code UQ
         string email UQ
         datetime created_at
+    }
+    FACULTY_FACE_DATA {
+        int id PK
+        int faculty_id FK_UQ
+        blob face_embedding
+        datetime created_at
+        datetime updated_at
     }
     STUDENTS {
         int id PK
@@ -115,11 +131,13 @@ erDiagram
         datetime updated_at
     }
 
-    DEPARTMENTS ||--o{ ACADEMIC_YEARS : owns
-    DEPARTMENTS ||--o{ USERS : assigned_to
-    DEPARTMENTS ||--o{ FACULTY : contains
-    DEPARTMENTS ||--o{ STUDENTS : contains
+    DEPARTMENTS ||--o{ PROGRAMMES : owns
+    DEPARTMENTS ||--o{ ACADEMIC_YEARS : scopes
+    PROGRAMMES ||--o{ ACADEMIC_YEARS : contains
+    DEPARTMENTS o|--o{ USERS : assigns
+    DEPARTMENTS o|--o{ FACULTY : contains
     DEPARTMENTS o|--o{ LABS : contains
+    DEPARTMENTS ||--o{ STUDENTS : contains
     ACADEMIC_YEARS ||--o{ STUDENTS : enrolls
     ACADEMIC_YEARS ||--o{ SUBJECTS : offers
     ACADEMIC_YEARS ||--o{ TIMETABLE_ENTRIES : schedules
@@ -130,6 +148,7 @@ erDiagram
     FACULTY ||--o{ TIMETABLE_ENTRIES : assigned
     FACULTY ||--o{ ATTENDANCE_SESSIONS : leads
     FACULTY ||--o{ ATTENDANCE : records
+    FACULTY ||--o| FACULTY_FACE_DATA : has_embedding
     SUBJECTS ||--o{ TIMETABLE_ENTRIES : scheduled_as
     SUBJECTS ||--o{ ATTENDANCE_SESSIONS : tracked_in
     SUBJECTS ||--o{ ATTENDANCE : counted_for
@@ -144,4 +163,4 @@ erDiagram
     USERS o|--o{ STUDENTS : user_id
 ```
 
-The ORM defines `Student.face_data` as one-to-one and `FaceData.student_id` is unique. `User.faculty_id`, `User.student_id`, and `Student.user_id` are nullable foreign keys without database uniqueness constraints; the diagram therefore does not imply a database-enforced one-to-one login link.
+`AcademicYear.department_id` and `AcademicYear.programme_id` are separate foreign keys; the API verifies that the selected programme belongs to the same department. `FaceData.student_id` and `FacultyFaceData.faculty_id` are unique, so each profile has at most one stored embedding. `User.faculty_id`, `User.student_id`, and `Student.user_id` are nullable foreign keys without database uniqueness constraints; the diagram does not imply a database-enforced one-to-one login link.

@@ -5,8 +5,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.database.database import SessionLocal
-from app.models import AcademicYear, Department, Faculty, FacultyAvailability, Lab, Subject, User
+from app.database.database import SessionLocal, engine
+from app.models import (
+    AcademicYear,
+    Department,
+    Faculty,
+    FacultyAvailability,
+    Lab,
+    Programme,
+    Subject,
+    TimetableEntry,
+    User,
+)
 from app.models.enums import Period, SubjectType, WeekDay
 from app.models.user import Role
 from app.services.feasibility_checker import (
@@ -29,8 +39,19 @@ from app.services.timetable_validator import (
     validate_single_entry,
 )
 
+FAILURES = 0
+
 
 def seed_minimal_data():
+    database_path = Path(engine.url.database)
+    if database_path.name != "smart_attendance.test_copy.db":
+        raise RuntimeError(
+            "Refusing to run: DATABASE_URL must point to backend/smart_attendance.test_copy.db"
+        )
+    resolved = database_path if database_path.is_absolute() else PROJECT_ROOT / database_path
+    if resolved.resolve().parent != PROJECT_ROOT.resolve():
+        raise RuntimeError(f"Refusing to run outside backend: {resolved.resolve()}")
+
     db = SessionLocal()
     try:
         dept = db.query(Department).first()
@@ -40,9 +61,18 @@ def seed_minimal_data():
             db.commit()
             db.refresh(dept)
 
+        programme = db.query(Programme).filter(
+            Programme.department_id == dept.id
+        ).order_by(Programme.id).first()
+        if programme is None:
+            programme = Programme(department_id=dept.id, name="Validator Programme")
+            db.add(programme)
+            db.commit()
+            db.refresh(programme)
+
         ay = db.query(AcademicYear).first()
         if ay is None:
-            ay = AcademicYear(department_id=dept.id, name='1st Year')
+            ay = AcademicYear(department_id=dept.id, programme_id=programme.id, name='1st Year')
             db.add(ay)
             db.commit()
             db.refresh(ay)
@@ -65,7 +95,7 @@ def seed_minimal_data():
 
         lab = db.query(Lab).filter(Lab.lab_code == 'LAB-TEST-1').first()
         if lab is None:
-            lab = Lab(lab_code='LAB-TEST-1', name='Test Lab')
+            lab = Lab(department_id=dept.id, lab_code='LAB-TEST-1', name='Test Lab')
             db.add(lab)
             db.commit()
             db.refresh(lab)
@@ -86,6 +116,8 @@ def seed_minimal_data():
 
         return {
             'year_id': ay.id,
+            'programme_id': programme.id,
+            'department_id': dept.id,
             'faculty_id': faculty.id,
             'lab_id': lab.id,
             'subject_id': subject.id,
@@ -95,11 +127,175 @@ def seed_minimal_data():
 
 
 def print_result(label, ok, detail=None):
+    global FAILURES
     status = 'PASS' if ok else 'FAIL'
+    if not ok:
+        FAILURES += 1
     if detail is None:
         print(f'{label}: {status}')
     else:
         print(f'{label}: {status} -> {detail}')
+
+
+def test_faculty_limit_edges(setup):
+    db = SessionLocal()
+    try:
+        year = AcademicYear(
+            department_id=db.query(Department).order_by(Department.id).first().id,
+            programme_id=setup["programme_id"],
+            name="Limit Regression Year",
+        )
+        db.add(year)
+        db.flush()
+        lab_faculty = Faculty(
+            department_id=year.department_id,
+            name="Limit Regression Lab Faculty",
+            faculty_code=f"FAC-LIMIT-LAB-{year.id}",
+            email=f"faculty-limit-lab-{year.id}@example.invalid",
+        )
+        db.add(lab_faculty)
+        db.flush()
+        subject = Subject(
+            academic_year_id=year.id,
+            name="Limit Regression Theory",
+            code="LIMIT-THEORY",
+            subject_type=SubjectType.THEORY.value,
+            weekly_periods=1,
+            faculty_id=setup["faculty_id"],
+        )
+        lab_subject = Subject(
+            academic_year_id=year.id,
+            name="Limit Regression Lab",
+            code="LIMIT-LAB-SUBJECT",
+            subject_type=SubjectType.LAB.value,
+            weekly_periods=3,
+            faculty_id=lab_faculty.id,
+        )
+        lab = Lab(
+            department_id=year.department_id,
+            lab_code="LIMIT-REGRESSION-LAB",
+            name="Limit Regression Lab",
+        )
+        db.add_all((subject, lab_subject, lab))
+        db.flush()
+
+        periods_by_day = {
+            WeekDay.MONDAY: (Period.P1, Period.P2),
+            WeekDay.TUESDAY: (Period.P1, Period.P2, Period.P3),
+            WeekDay.WEDNESDAY: (Period.P1, Period.P2, Period.P3),
+            WeekDay.THURSDAY: (Period.P1, Period.P2, Period.P3),
+            WeekDay.FRIDAY: (Period.P1, Period.P2, Period.P3),
+        }
+        entries = [
+            TimetableEntry(
+                academic_year_id=year.id,
+                subject_id=subject.id,
+                faculty_id=setup["faculty_id"],
+                day=day,
+                period=period,
+            )
+            for day, periods in periods_by_day.items()
+            for period in periods
+        ]
+        db.add_all(entries)
+        db.flush()
+
+        third_allowed = check_faculty_daily_limit(
+            db, setup["faculty_id"], WeekDay.MONDAY
+        )[0]
+        print_result("faculty 3rd period allowed", third_allowed, "2 existing + candidate = 3")
+        fifteenth_allowed = check_faculty_weekly_limit(db, setup["faculty_id"])[0]
+        print_result("faculty 15th weekly period allowed", fifteenth_allowed, "14 existing + candidate = 15")
+
+        monday_third = TimetableEntry(
+            academic_year_id=year.id,
+            subject_id=subject.id,
+            faculty_id=setup["faculty_id"],
+            day=WeekDay.MONDAY,
+            period=Period.P3,
+        )
+        db.add(monday_third)
+        db.flush()
+        fourth_rejected = not check_faculty_daily_limit(
+            db, setup["faculty_id"], WeekDay.MONDAY
+        )[0]
+        print_result("faculty 4th period rejected", fourth_rejected, "3 existing + candidate = 4")
+
+        db.commit()
+        sixteenth_rejected = not check_faculty_weekly_limit(
+            db, setup["faculty_id"]
+        )[0]
+        print_result("faculty 16th weekly period rejected", sixteenth_rejected, "15 existing + candidate = 16")
+
+        pending = [
+            {
+                "id": entry.id,
+                "academic_year_id": entry.academic_year_id,
+                "subject_id": entry.subject_id,
+                "faculty_id": entry.faculty_id,
+                "day": entry.day,
+                "period": entry.period,
+                "lab_id": entry.lab_id,
+            }
+            for entry in db.query(TimetableEntry).filter(
+                TimetableEntry.academic_year_id == year.id
+            ).all()
+        ]
+        move_valid, move_reasons = validate_single_entry(
+            db,
+            academic_year_id=year.id,
+            subject_id=subject.id,
+            faculty_id=setup["faculty_id"],
+            day=WeekDay.MONDAY,
+            period=Period.P4,
+            lab_id=None,
+            subject_type=SubjectType.THEORY.value,
+            pending_entries=pending,
+            exclude_entry_id=monday_third.id,
+        )
+        print_result(
+            "moving entry within same day avoids double counting",
+            move_valid,
+            f"excluded id={monday_third.id}; reasons={move_reasons}",
+        )
+
+        unchanged_valid, unchanged_reasons = validate_single_entry(
+            db,
+            academic_year_id=year.id,
+            subject_id=subject.id,
+            faculty_id=setup["faculty_id"],
+            day=WeekDay.MONDAY,
+            period=Period.P3,
+            lab_id=None,
+            subject_type=SubjectType.THEORY.value,
+            pending_entries=pending,
+            exclude_entry_id=monday_third.id,
+        )
+        print_result(
+            "unchanged edit passes limits",
+            unchanged_valid,
+            f"excluded id={monday_third.id}; reasons={unchanged_reasons}",
+        )
+
+        lab_ok, lab_reasons = validate_lab_block(
+            db,
+            academic_year_id=year.id,
+            subject_id=lab_subject.id,
+            faculty_id=lab_faculty.id,
+            lab_id=lab.id,
+            day=WeekDay.MONDAY,
+            start_period=Period.P4,
+            lab_total_count=db.query(Lab).filter(Lab.department_id == year.department_id).count(),
+            pending_entries=[],
+            department_id=year.department_id,
+        )
+        print_result(
+            "lab block counts three candidate periods",
+            lab_ok,
+            f"daily=3, weekly=3; reasons={lab_reasons}",
+        )
+    finally:
+        db.close()
 
 
 def demo():
@@ -147,7 +343,14 @@ def demo():
 
         ok, reason = check_faculty_weekly_limit(db, faculty_id)
         print_result('weekly limit valid', ok is True, reason)
-        ok, reason = check_faculty_weekly_limit(db, faculty_id, pending_entries=[{'faculty_id': faculty_id, 'id': 4000} for _ in range(16)])
+        ok, reason = check_faculty_weekly_limit(
+            db,
+            faculty_id,
+            pending_entries=[
+                {'faculty_id': faculty_id, 'id': 4000 + index}
+                for index in range(16)
+            ],
+        )
         print_result('weekly limit invalid', ok is False, reason)
 
         ok, reason = check_faculty_availability(db, faculty_id, WeekDay.FRIDAY, Period.P5)
@@ -258,9 +461,16 @@ def demo():
 
         # feasibility checks
         # create a year with total weekly periods over 30
-        ay_big = db.query(AcademicYear).filter_by(department_id=1, name='Heavy Year').first()
+        ay_big = db.query(AcademicYear).filter_by(
+            programme_id=setup["programme_id"],
+            name='Heavy Year',
+        ).first()
         if ay_big is None:
-            ay_big = AcademicYear(department_id=1, name='Heavy Year')
+            ay_big = AcademicYear(
+                department_id=setup["department_id"],
+                programme_id=setup["programme_id"],
+                name='Heavy Year',
+            )
             db.add(ay_big)
             db.commit(); db.refresh(ay_big)
         for idx in range(8):
@@ -279,7 +489,7 @@ def demo():
                 name='Heavy Lab Requirement',
                 code='HEAVY-LAB-REQUIREMENT',
                 subject_type=SubjectType.LAB.value,
-                weekly_periods=63,
+                weekly_periods=153,
                 faculty_id=faculty_id,
             ))
             db.commit()
@@ -297,6 +507,10 @@ def demo():
         print_result('full feasibility check returns dict', isinstance(full_result, dict), str(full_result))
     finally:
         db.close()
+    test_faculty_limit_edges(setup)
+    print(f"OVERALL: {'FAIL' if FAILURES else 'PASS'} ({FAILURES} failed checks)")
+    if FAILURES:
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

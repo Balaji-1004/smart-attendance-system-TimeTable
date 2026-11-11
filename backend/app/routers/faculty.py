@@ -1,12 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import exc
 from sqlalchemy.orm import Session
 
 from app.core.security import get_user_department_id, hash_password, require_role
 from app.database.database import get_db
-from app.models import Faculty, User
+from app.models import Faculty, FacultyFaceData, User
 from app.models.user import Role
 from app.schemas.faculty import FacultyCreate, FacultyResponse, FacultyUpdate
+from app.schemas.faculty_face_data import (
+    FacultyFaceRegistrationResponse,
+    FacultyFaceRegistrationStatusResponse,
+)
+from app.services.face_service import detect_single_face, generate_embedding, serialize_embedding
 
 router = APIRouter(prefix="/faculty", tags=["faculty"])
 
@@ -30,9 +35,85 @@ def _serialize_faculty(db: Session, faculty: Faculty) -> dict:
         "name": faculty.name,
         "faculty_code": faculty.faculty_code,
         "email": faculty.email,
+        "face_registered": bool(faculty.face_registered),
         "user_id": user_id,
         "created_at": faculty.created_at,
     }
+
+
+def _register_faculty_face(db: Session, faculty: Faculty, file_bytes: bytes):
+    detection = detect_single_face(file_bytes)
+    face_count = detection.get("face_count", 0)
+    if face_count == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No face detected in the uploaded image.")
+    if face_count > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Multiple faces detected; please upload an image with exactly one face.",
+        )
+
+    serialized_embedding = serialize_embedding(generate_embedding(file_bytes))
+    existing = db.query(FacultyFaceData).filter(FacultyFaceData.faculty_id == faculty.id).first()
+    if existing is None:
+        db.add(FacultyFaceData(faculty_id=faculty.id, face_embedding=serialized_embedding))
+        message = "Face registration successful."
+    else:
+        existing.face_embedding = serialized_embedding
+        message = "Face registration updated successfully."
+    faculty.face_registered = True
+    db.commit()
+    return FacultyFaceRegistrationResponse(
+        faculty_id=faculty.id,
+        face_registered=True,
+        message=message,
+    )
+
+
+@router.post("/me/face-registration", response_model=FacultyFaceRegistrationResponse)
+async def register_own_faculty_face(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("FACULTY")),
+):
+    faculty = db.query(Faculty).filter(Faculty.id == current_user.faculty_id).first()
+    if faculty is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty profile not found")
+    return _register_faculty_face(db, faculty, await file.read())
+
+
+@router.post("/{faculty_id}/face-registration", response_model=FacultyFaceRegistrationResponse)
+async def register_faculty_face(
+    faculty_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("HOD")),
+):
+    department_id = get_user_department_id(db, current_user)
+    faculty = db.query(Faculty).filter(Faculty.id == faculty_id).first()
+    if faculty is None or faculty.department_id != department_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty not found")
+    return _register_faculty_face(db, faculty, await file.read())
+
+
+@router.get(
+    "/{faculty_id}/face-registration-status",
+    response_model=FacultyFaceRegistrationStatusResponse,
+)
+def get_faculty_face_registration_status(
+    faculty_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("HOD")),
+):
+    department_id = get_user_department_id(db, current_user)
+    faculty = db.query(Faculty).filter(Faculty.id == faculty_id).first()
+    if faculty is None or faculty.department_id != department_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Faculty not found")
+    face_data = db.query(FacultyFaceData).filter(FacultyFaceData.faculty_id == faculty_id).first()
+    return FacultyFaceRegistrationStatusResponse(
+        faculty_id=faculty_id,
+        face_registered=bool(faculty.face_registered),
+        face_data_exists=face_data is not None,
+    )
 
 
 @router.post("", response_model=FacultyResponse)

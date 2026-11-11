@@ -8,15 +8,21 @@ from app.database.database import Base
 class AcademicYear(Base):
     __tablename__ = "academic_years"
     __table_args__ = (
-        UniqueConstraint("department_id", "name", name="uq_department_year"),
+        UniqueConstraint("programme_id", "name", name="uq_programme_year"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
     department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), nullable=False)
+    programme_id = Column(Integer, ForeignKey("programmes.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     department = relationship("Department", back_populates="academic_years")
+    programme = relationship("Programme", back_populates="academic_years")
+
+    @property
+    def programme_name(self):
+        return self.programme.name
 
     # One academic year has many students
     students = relationship("Student", back_populates="academic_year")

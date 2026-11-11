@@ -40,3 +40,4 @@ class TimetableEntryUpdate(BaseModel):
 
 class DepartmentTimetableEntryResponse(TimetableEntryResponse):
     academic_year_name: str
+    programme_name: str

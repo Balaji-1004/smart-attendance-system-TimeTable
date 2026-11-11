@@ -70,6 +70,7 @@ def get_faculty_dashboard_route(
             "date": session.date.isoformat(),
             "subject_name": session.subject.name,
             "academic_year_name": session.academic_year.name,
+            "programme_name": session.academic_year.programme.name,
             "status": session.status.value,
             "present_count": int(counts.present_count or 0),
             "absent_count": int(counts.absent_count or 0),
@@ -89,6 +90,7 @@ def get_faculty_dashboard_route(
             "period": entry.period.value,
             "subject_name": entry.subject.name,
             "academic_year_name": entry.academic_year.name,
+            "programme_name": entry.academic_year.programme.name,
             "lab_name": entry.lab.name if entry.lab else None,
         })
 
@@ -165,12 +167,14 @@ def get_student_dashboard_route(
             "subject_name": entry.subject.name,
             "faculty_name": entry.faculty.name,
             "academic_year_name": student.academic_year.name,
+            "programme_name": student.academic_year.programme.name,
         })
 
     return {
         "student_name": student.name,
         "roll_number": student.roll_number,
         "academic_year_name": student.academic_year.name,
+        "programme_name": student.academic_year.programme.name,
         "attendance": {
             "present_count": present_count,
             "absent_count": absent_count,

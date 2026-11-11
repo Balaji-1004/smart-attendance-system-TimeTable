@@ -30,6 +30,45 @@ def _pending_get(pending, key):
     return None
 
 
+def _excluded_ids(exclude_entry_id):
+    if exclude_entry_id is None:
+        return set()
+    if isinstance(exclude_entry_id, (set, list, tuple)):
+        return set(exclude_entry_id)
+    return {exclude_entry_id}
+
+
+def _faculty_entry_count(db, faculty_id, day=None, pending_entries=None, exclude_entry_id=None):
+    excluded = _excluded_ids(exclude_entry_id)
+    query = db.query(TimetableEntry).filter(TimetableEntry.faculty_id == faculty_id)
+    if day is not None:
+        query = query.filter(TimetableEntry.day == day)
+    existing_rows = query.all()
+
+    counted_ids = set()
+    count = 0
+    for row in existing_rows:
+        if row.id in excluded:
+            continue
+        counted_ids.add(row.id)
+        count += 1
+
+    for pending in _normalize_pending_entries(pending_entries):
+        if _pending_get(pending, "faculty_id") != faculty_id:
+            continue
+        if day is not None and _normalize_value(_pending_get(pending, "day")) != day:
+            continue
+        pending_id = _pending_get(pending, "id")
+        if pending_id in excluded:
+            continue
+        if pending_id is not None:
+            if pending_id in counted_ids:
+                continue
+            counted_ids.add(pending_id)
+        count += 1
+    return count
+
+
 def get_lab_block_periods(start_period: Period):
     start = _normalize_value(start_period)
     if start == Period.P1.value:
@@ -113,40 +152,40 @@ def check_lab_clash(db, lab_id, day, period, pending_entries=None, exclude_entry
     return True, None
 
 
-def check_faculty_daily_limit(db, faculty_id, day, pending_entries=None, exclude_entry_id=None):
+def check_faculty_daily_limit(
+    db,
+    faculty_id,
+    day,
+    pending_entries=None,
+    exclude_entry_id=None,
+    candidate_count=1,
+):
     day = _normalize_value(day)
-    existing_count = db.query(TimetableEntry).filter(
-        TimetableEntry.faculty_id == faculty_id,
-        TimetableEntry.day == day,
-    ).count()
-
-    pending_count = 0
-    for pending in _normalize_pending_entries(pending_entries):
-        if (
-            _pending_get(pending, "faculty_id") == faculty_id
-            and _normalize_value(_pending_get(pending, "day")) == day
-            and (exclude_entry_id is None or _pending_get(pending, "id") != exclude_entry_id)
-        ):
-            pending_count += 1
-
-    total = existing_count + pending_count
+    total = _faculty_entry_count(
+        db,
+        faculty_id,
+        day=day,
+        pending_entries=pending_entries,
+        exclude_entry_id=exclude_entry_id,
+    ) + candidate_count
     if total > 3:
         return False, "Faculty exceeds the daily limit of 3 periods."
     return True, None
 
 
-def check_faculty_weekly_limit(db, faculty_id, pending_entries=None, exclude_entry_id=None):
-    existing_count = db.query(TimetableEntry).filter(TimetableEntry.faculty_id == faculty_id).count()
-
-    pending_count = 0
-    for pending in _normalize_pending_entries(pending_entries):
-        if (
-            _pending_get(pending, "faculty_id") == faculty_id
-            and (exclude_entry_id is None or _pending_get(pending, "id") != exclude_entry_id)
-        ):
-            pending_count += 1
-
-    total = existing_count + pending_count
+def check_faculty_weekly_limit(
+    db,
+    faculty_id,
+    pending_entries=None,
+    exclude_entry_id=None,
+    candidate_count=1,
+):
+    total = _faculty_entry_count(
+        db,
+        faculty_id,
+        pending_entries=pending_entries,
+        exclude_entry_id=exclude_entry_id,
+    ) + candidate_count
     if total > 15:
         return False, "Faculty exceeds the weekly limit of 15 periods."
     return True, None
@@ -241,9 +280,22 @@ def validate_single_entry(db, academic_year_id, subject_id, faculty_id, day, per
         elif check is check_lab_clash:
             ok, reason = check(db, lab_id, day, period, pending_entries=pending_entries, exclude_entry_id=exclude_entry_id)
         elif check is check_faculty_daily_limit:
-            ok, reason = check(db, faculty_id, day, pending_entries=pending_entries, exclude_entry_id=exclude_entry_id)
+            ok, reason = check(
+                db,
+                faculty_id,
+                day,
+                pending_entries=pending_entries,
+                exclude_entry_id=exclude_entry_id,
+                candidate_count=1,
+            )
         elif check is check_faculty_weekly_limit:
-            ok, reason = check(db, faculty_id, pending_entries=pending_entries, exclude_entry_id=exclude_entry_id)
+            ok, reason = check(
+                db,
+                faculty_id,
+                pending_entries=pending_entries,
+                exclude_entry_id=exclude_entry_id,
+                candidate_count=1,
+            )
         elif check is check_faculty_availability:
             ok, reason = check(db, faculty_id, day, period)
         elif check is check_lab_room_consistency:
@@ -313,12 +365,25 @@ def validate_lab_block(
             seen.add(concurrency_reason)
             reasons.append(f"{period.value}: {concurrency_reason}")
 
-    daily_ok, daily_reason = check_faculty_daily_limit(db, faculty_id, day, pending_entries=combined_pending, exclude_entry_id=None)
+    daily_ok, daily_reason = check_faculty_daily_limit(
+        db,
+        faculty_id,
+        day,
+        pending_entries=combined_pending,
+        exclude_entry_id=exclude_entry_ids,
+        candidate_count=3,
+    )
     if not daily_ok and daily_reason and daily_reason not in seen:
         seen.add(daily_reason)
         reasons.append(daily_reason)
 
-    weekly_ok, weekly_reason = check_faculty_weekly_limit(db, faculty_id, pending_entries=combined_pending, exclude_entry_id=None)
+    weekly_ok, weekly_reason = check_faculty_weekly_limit(
+        db,
+        faculty_id,
+        pending_entries=combined_pending,
+        exclude_entry_id=exclude_entry_ids,
+        candidate_count=3,
+    )
     if not weekly_ok and weekly_reason and weekly_reason not in seen:
         seen.add(weekly_reason)
         reasons.append(weekly_reason)

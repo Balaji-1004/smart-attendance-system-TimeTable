@@ -5,10 +5,21 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.database.database import SessionLocal
-from app.models import AcademicYear, Department, Faculty, Lab, Subject, TimetableEntry
+from app.database.database import SessionLocal, engine
+from app.models import AcademicYear, Department, Faculty, Lab, Programme, Subject, TimetableEntry
 from app.models.enums import SubjectType
 from app.services.timetable_generator import generate_timetable
+
+
+def ensure_test_database():
+    database_path = Path(engine.url.database)
+    if database_path.name != "smart_attendance.test_copy.db":
+        raise RuntimeError(
+            "Refusing to run: DATABASE_URL must point to backend/smart_attendance.test_copy.db"
+        )
+    resolved = database_path if database_path.is_absolute() else ROOT / database_path
+    if resolved.resolve().parent != ROOT.resolve():
+        raise RuntimeError(f"Refusing to run outside backend: {resolved.resolve()}")
 
 
 def ensure_year(db, year_name, faculty_code, lab_code):
@@ -18,9 +29,15 @@ def ensure_year(db, year_name, faculty_code, lab_code):
         db.add(dept)
         db.commit(); db.refresh(dept)
 
+    programme = db.query(Programme).filter(Programme.department_id == dept.id).first()
+    if programme is None:
+        programme = Programme(department_id=dept.id, name=dept.name)
+        db.add(programme)
+        db.commit(); db.refresh(programme)
+
     year = db.query(AcademicYear).filter(AcademicYear.name == year_name).first()
     if year is None:
-        year = AcademicYear(department_id=dept.id, name=year_name)
+        year = AcademicYear(department_id=dept.id, programme_id=programme.id, name=year_name)
         db.add(year)
         db.commit(); db.refresh(year)
 
@@ -29,13 +46,13 @@ def ensure_year(db, year_name, faculty_code, lab_code):
 
     faculty = db.query(Faculty).filter(Faculty.faculty_code == faculty_code).first()
     if faculty is None:
-        faculty = Faculty(name=f'{year_name} Faculty', faculty_code=faculty_code, email=f'{faculty_code.lower()}@example.com')
+        faculty = Faculty(department_id=dept.id, name=f'{year_name} Faculty', faculty_code=faculty_code, email=f'{faculty_code.lower()}@example.com')
         db.add(faculty)
         db.commit(); db.refresh(faculty)
 
     lab = db.query(Lab).filter(Lab.lab_code == lab_code).first()
     if lab is None:
-        lab = Lab(lab_code=lab_code, name=lab_code)
+        lab = Lab(department_id=dept.id, lab_code=lab_code, name=lab_code)
         db.add(lab)
         db.commit(); db.refresh(lab)
 
@@ -57,10 +74,16 @@ def ensure_other_year(db):
         db.add(dept)
         db.commit(); db.refresh(dept)
 
+    programme = db.query(Programme).filter(Programme.department_id == dept.id).first()
+    if programme is None:
+        programme = Programme(department_id=dept.id, name=dept.name)
+        db.add(programme)
+        db.commit(); db.refresh(programme)
+
     year_name = 'Other Year 6c'
     year = db.query(AcademicYear).filter(AcademicYear.name == year_name).first()
     if year is None:
-        year = AcademicYear(department_id=dept.id, name=year_name)
+        year = AcademicYear(department_id=dept.id, programme_id=programme.id, name=year_name)
         db.add(year)
         db.commit(); db.refresh(year)
 
@@ -69,13 +92,13 @@ def ensure_other_year(db):
 
     faculty = db.query(Faculty).filter(Faculty.faculty_code == 'FAC-OTHER-6C').first()
     if faculty is None:
-        faculty = Faculty(name='Other Faculty 6c', faculty_code='FAC-OTHER-6C', email='other6c@example.com')
+        faculty = Faculty(department_id=dept.id, name='Other Faculty 6c', faculty_code='FAC-OTHER-6C', email='other6c@example.com')
         db.add(faculty)
         db.commit(); db.refresh(faculty)
 
     lab = db.query(Lab).filter(Lab.lab_code == 'LAB-OTHER-6C').first()
     if lab is None:
-        lab = Lab(lab_code='LAB-OTHER-6C', name='Other Lab 6c')
+        lab = Lab(department_id=dept.id, lab_code='LAB-OTHER-6C', name='Other Lab 6c')
         db.add(lab)
         db.commit(); db.refresh(lab)
 
@@ -86,6 +109,7 @@ def ensure_other_year(db):
 
 
 def main():
+    ensure_test_database()
     db = SessionLocal()
     try:
         year1_id = ensure_year(db, 'Generator Run Year', 'FAC-GEN-RUN', 'LAB-GEN-01')

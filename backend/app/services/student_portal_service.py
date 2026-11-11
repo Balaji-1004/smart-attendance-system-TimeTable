@@ -22,6 +22,7 @@ def get_student_profile(student: Student) -> dict:
         "roll_number": student.roll_number,
         "email": student.email,
         "academic_year_name": student.academic_year.name,
+        "programme_name": student.academic_year.programme.name,
         "department_name": student.department.name,
         "face_registered": student.face_registered,
     }

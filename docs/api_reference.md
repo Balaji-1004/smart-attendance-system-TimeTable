@@ -7,8 +7,12 @@ All paths are relative to the FastAPI origin (default `http://localhost:8000`). 
 | GET | `/health` | Public | Return service health status. |
 | POST | `/auth/login` | Public | Validate credentials and return an access token and linked identity fields. |
 | GET | `/departments/me` | HOD, FACULTY, STUDENT | Return the authenticated user's database-derived department. |
-| POST | `/academic-years` | HOD | Create an academic year in the caller's department. |
-| GET | `/academic-years` | HOD, FACULTY | List academic years in the caller's department. |
+| GET | `/programmes` | HOD, FACULTY | List programmes in the caller's department. |
+| POST | `/programmes` | HOD | Create a programme in the caller's department. |
+| PUT | `/programmes/{programme_id}` | HOD | Rename a department-owned programme. |
+| DELETE | `/programmes/{programme_id}` | HOD | Delete a department-owned programme only when it has no academic years. |
+| POST | `/academic-years` | HOD | Create an academic year using a programme in the caller's department. |
+| GET | `/academic-years?programme_id=` | HOD, FACULTY | List caller-department academic years, optionally filtered by programme. |
 | GET | `/academic-years/{academic_year_id}` | HOD, FACULTY | Read one department-owned academic year. |
 | PUT | `/academic-years/{academic_year_id}` | HOD | Update a department-owned academic year. |
 | DELETE | `/academic-years/{academic_year_id}` | HOD | Delete a department-owned academic year if no dependent rows prevent it. |
@@ -28,6 +32,9 @@ All paths are relative to the FastAPI origin (default `http://localhost:8000`). 
 | GET | `/faculty/{faculty_id}` | HOD | Read a department-owned faculty record. |
 | PUT | `/faculty/{faculty_id}` | HOD | Update a department-owned faculty record. |
 | DELETE | `/faculty/{faculty_id}` | HOD | Delete a department-owned faculty record if it has no blocking assignments. |
+| POST | `/faculty/me/face-registration` | FACULTY | Register or replace the authenticated faculty member's face embedding from a multipart image. |
+| POST | `/faculty/{faculty_id}/face-registration` | HOD | Register or replace a department faculty member's face embedding. |
+| GET | `/faculty/{faculty_id}/face-registration-status` | HOD | Read face-registration status for a department faculty member. |
 | POST | `/subjects` | HOD | Create a subject whose year and faculty belong to the caller's department. |
 | GET | `/subjects?academic_year_id=` | HOD | List department subjects, optionally filtered by academic year. |
 | GET | `/subjects/{subject_id}` | HOD | Read a department-owned subject. |

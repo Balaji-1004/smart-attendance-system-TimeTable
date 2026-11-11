@@ -5,10 +5,21 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.database.database import SessionLocal
-from app.models import AcademicYear, Department, Faculty, Subject
+from app.database.database import SessionLocal, engine
+from app.models import AcademicYear, Department, Faculty, Programme, Subject
 from app.models.enums import SubjectType
 from app.services.timetable_generator import load_blocks_for_year
+
+
+def ensure_test_database():
+    database_path = Path(engine.url.database)
+    if database_path.name != "smart_attendance.test_copy.db":
+        raise RuntimeError(
+            "Refusing to run: DATABASE_URL must point to backend/smart_attendance.test_copy.db"
+        )
+    resolved = database_path if database_path.is_absolute() else ROOT / database_path
+    if resolved.resolve().parent != ROOT.resolve():
+        raise RuntimeError(f"Refusing to run outside backend: {resolved.resolve()}")
 
 
 def ensure_test_data(db):
@@ -19,16 +30,32 @@ def ensure_test_data(db):
         db.commit()
         db.refresh(dept)
 
+    programme = db.query(Programme).filter(Programme.department_id == dept.id).first()
+    if programme is None:
+        programme = Programme(department_id=dept.id, name=dept.name)
+        db.add(programme)
+        db.commit()
+        db.refresh(programme)
+
     year = db.query(AcademicYear).filter(AcademicYear.name == 'Generator Test Year').first()
     if year is None:
-        year = AcademicYear(department_id=dept.id, name='Generator Test Year')
+        year = AcademicYear(
+            department_id=dept.id,
+            programme_id=programme.id,
+            name='Generator Test Year',
+        )
         db.add(year)
         db.commit()
         db.refresh(year)
 
     faculty = db.query(Faculty).filter(Faculty.faculty_code == 'FAC-GEN-01').first()
     if faculty is None:
-        faculty = Faculty(name='Generator Faculty', faculty_code='FAC-GEN-01', email='genfaculty@example.com')
+        faculty = Faculty(
+            department_id=dept.id,
+            name='Generator Faculty',
+            faculty_code='FAC-GEN-01',
+            email='genfaculty@example.com',
+        )
         db.add(faculty)
         db.commit()
         db.refresh(faculty)
@@ -50,6 +77,7 @@ def ensure_test_data(db):
 
 
 def main():
+    ensure_test_database()
     db = SessionLocal()
     try:
         year_id, faculty_id = ensure_test_data(db)

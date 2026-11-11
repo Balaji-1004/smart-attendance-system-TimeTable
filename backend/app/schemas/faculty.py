@@ -33,5 +33,6 @@ class FacultyResponse(BaseModel):
     name: str
     faculty_code: str
     email: str
+    face_registered: bool = False
     user_id: int | None = None
     created_at: datetime

@@ -1,129 +1,119 @@
 # Test results and verification notes
 
-The regression scripts below were each run with `DATABASE_URL=sqlite:///./smart_attendance.test_copy.db` after copying the real database to a fresh `smart_attendance.test_copy.db`. No test was run against the real database.
+## Test method and data boundary
+
+Each database-writing regression was run on its own fresh `backend/smart_attendance.test_copy.db`, copied from `smart_attendance.backup_before_final_setup.db`. The copy was migrated with `scripts/migrate_programmes.py --apply`, then populated with the MTech and MCA seed scripts before the applicable test. No test or seed was run against the real database.
+
+The matching test-copy baseline had face-embedding SHA-256 `0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242`. The programme migration preserved that hash and the two `face_data` rows. The migration retained academic-year ids 1, 2, 4, and 5, and removed year 3 after moving its students to year 2.
+
+## Real database migration guard
+
+The backup `backend/smart_attendance.backup_before_programmes.db` was created before Phase 13 inspection. A later guarded `migrate_programmes.py --apply` attempt against the real `backend/smart_attendance.db` refused before changing data:
+
+```text
+Before face_embedding SHA-256: f6e5a7c5c387fb582316c48519c656657deb6a407ce089baccab527e0cbc58a9
+RuntimeError: Refusing apply: expected face hash 0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242, found f6e5a7c5c387fb582316c48519c656657deb6a407ce089baccab527e0cbc58a9.
+REAL MIGRATION EXIT: 1
+Real counts after guarded attempt: {'users': 5, 'faculty': 3, 'students': 13, 'face_data': 3, 'subjects': 12, 'timetable_entries': 33, 'attendance_sessions': 5, 'attendance': 19}
+Real face hash after guarded attempt: f6e5a7c5c387fb582316c48519c656657deb6a407ce089baccab527e0cbc58a9
+Departments after guarded attempt: [(1, 'MCA'), (2, 'MTech'), (3, 'Computer Science')]
+```
+
+The required hash did not match the real DB, so its migration and real MCA seed were not applied. The production database therefore remains in its pre-migration, three-department state. The results below describe only isolated test copies.
+
+## Programme seeding and timetable generation
+
+After migration and seeding on a fresh test copy:
+
+```text
+Capacity check: PASS (faculty <= 15 and academic years <= 30)
+MTech timetable generation:
+  1st Year: placed_count=11, unscheduled=[], feasibility_warnings={'year_warnings': [], 'faculty_warnings': {}, 'lab_warnings': []}
+  2nd Year: placed_count=11, unscheduled=[], feasibility_warnings={'year_warnings': [], 'faculty_warnings': {}, 'lab_warnings': []}
+Capacity check: PASS (faculty <= 15/week, each MCA year <= 30/week)
+MCA 1st Year: placed_count=21, unscheduled=[], feasibility_warnings={'year_warnings': [], 'faculty_warnings': {}, 'lab_warnings': []}
+MCA 2nd Year: placed_count=15, unscheduled=[], feasibility_warnings={'year_warnings': [], 'faculty_warnings': {}, 'lab_warnings': []}
+After face_embedding SHA-256: 0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242
+```
+
+The new faculty/student credentials printed by the seeding scripts were generated for test copies only and are intentionally not recorded here.
+
+Final migrated-and-seeded test-copy inventory:
+
+```text
+Departments: [(1, 'Computer Science')]
+Programmes: [(1, 1, 'MCA'), (2, 1, 'MTech')]
+Academic years: [(1, '1st Year', 1, 'MCA'), (2, '2nd Year', 1, 'MCA'), (4, '1st Year', 1, 'MTech'), (5, '2nd Year', 1, 'MTech')]
+Per-programme counts:
+('MCA', 14, 12, 36)
+('MTech', 8, 8, 22)
+Faculty: [('FAC-CS-01', 'Dr T Chithralekha', 1), ('FAC-CS-02', 'Dr Rajpriya Darshini', 1), ('FAC-CS-03', 'Dr G Krishnapriya', 1), ('FAC-CS-04', 'Mr Seenivasan R P', 1), ('FAC-CS-05', 'Dr Sukhvinder Singh', 1), ('FAC-CS-06', 'Dr SL Jayalakshmi', 1), ('FAC-MT-01', 'Dr. Kavya Nair', 1), ('FAC-MT-02', 'Prof. Rajesh Menon', 1), ('FAC-MT-03', 'Ms. Divya Krishnan', 1)]
+Labs: [('LAB-001', 'Computer Lab 1', 1), ('LAB-002', 'Computer Lab 2', 1), ('LAB-MT-01', 'MTech Lab 1', 1), ('LAB-MT-02', 'MTech Lab 2', 1)]
+Face hash: 0b051a6c5b0a253c5f5786da5a3fe656ecfb65ab93967ae58fd872d6718a5242
+```
+
+The counts tuple is `(programme, students, subjects, timetable_entries)`.
 
 ## Validator regression
 
-Fresh-copy run of `backend/scripts/test_validator.py`:
+`scripts/test_validator.py` checks existing validator/feasibility cases plus the daily/weekly candidate limits, edit exclusions, and three-period lab candidates. Its latest fresh-copy run ended:
 
 ```text
-year clash valid: PASS
-year clash invalid with pending entry: PASS -> Academic year slot already occupied.
-faculty clash valid: PASS
-faculty clash invalid with pending entry: PASS -> Faculty is already assigned in this slot.
-lab clash valid: PASS
-lab clash invalid with pending entry: PASS -> Laboratory room is already booked in this slot.
-daily limit valid: PASS
-daily limit invalid: PASS -> Faculty exceeds the daily limit of 3 periods.
-weekly limit valid: PASS
-weekly limit invalid: PASS -> Faculty exceeds the weekly limit of 15 periods.
-faculty availability valid: PASS
-faculty availability invalid: PASS -> Faculty is marked unavailable for this slot.
-lab room consistency invalid theory-with-lab: PASS -> Theory subjects must not be assigned a laboratory room.
-lab room consistency invalid lab-without-room: PASS -> Lab subjects must be assigned a laboratory room.
-lab room consistency valid theory-without-lab: PASS
-lab room consistency valid lab-with-lab: PASS
-validate_single_entry pass case: PASS -> []
-validate_single_entry fail case: PASS -> ['Academic year slot already occupied.', 'Faculty is already assigned in this slot.']
-lab block valid start P1: PASS
-lab block invalid start P2: PASS
-lab block valid start P4: PASS
-lab concurrency valid: PASS
-lab concurrency invalid: PASS -> All lab rooms are occupied in this slot.
-validate_lab_block pass case: PASS -> []
-validate_lab_block fail case: PASS -> ['P1: Academic year slot already occupied.', 'P1: Faculty is already assigned in this slot.', 'P1: Laboratory room is already booked in this slot.', 'P1: All lab rooms are occupied in this slot.']
-year feasibility catches overload: PASS -> ['Academic year total weekly requirement (103) exceeds available slots (30).']
-faculty feasibility catches overload: PASS -> ['Faculty (Test Faculty) is assigned 107 total weekly periods, exceeding the maximum of 15.']
-lab feasibility result: PASS -> ['Estimated lab-block requirement (21) exceeds available lab capacity (20).']
-full feasibility check returns dict: PASS -> {'year_warnings': ['Academic year total weekly requirement (103) exceeds available slots (30).'], 'faculty_warnings': {7: ['Faculty (Test Faculty) is assigned 107 total weekly periods, exceeding the maximum of 15.']}, 'lab_warnings': ['Estimated lab-block requirement (21) exceeds available lab capacity (20).']}
-```
-
-## Department isolation
-
-Fresh-copy run of `backend/scripts/test_department_isolation.py`:
-
-```text
-test-dept-b-hod login includes DB-derived department_id: PASS - status=200, response=3, jwt=3
-test-dept-b-faculty login includes DB-derived department_id: PASS - status=200, response=3, jwt=3
-test-dept-b-student login includes DB-derived department_id: PASS - status=200, response=3, jwt=3
-HOD-B cannot access first department /academic-years: PASS - list=200, get=404, update=404, delete=404
-HOD-B cannot access first department /students: PASS - list=200, get=404, update=404, delete=404
-HOD-B cannot access first department /faculty: PASS - list=200, get=404, update=404, delete=404
-HOD-B cannot access first department /subjects: PASS - list=200, get=404, update=404, delete=404
-HOD-B cannot access first department /labs: PASS - list=200, get=404, update=404, delete=404
-First-department HOD cannot access B /academic-years: PASS - list=200, get=404, update=404, delete=404
-First-department HOD cannot access B /students: PASS - list=200, get=404, update=404, delete=404
-First-department HOD cannot access B /faculty: PASS - list=200, get=404, update=404, delete=404
-First-department HOD cannot access B /subjects: PASS - list=200, get=404, update=404, delete=404
-First-department HOD cannot access B /labs: PASS - list=200, get=404, update=404, delete=404
-Face-registration status is department-scoped: PASS - cross statuses=404/404
-Faculty availability is department-scoped: PASS - cross create=404, B create=200, cross delete=404
-HOD-B cannot create a subject with first-department faculty: PASS - status=400, body={"detail":"Faculty does not belong to this department."}
-Mismatched academic-year department is rejected: PASS - status=403
-HOD-B cannot move a subject into a first-department academic year: PASS - status=404
-HOD-B timetable generation uses only B labs; first-department count unchanged: PASS - status=200, placed=3, B lab ids=[5], first-department entries=33->33
-Timetable year/faculty/department/update/delete are department-scoped: PASS - year=200/404, cross faculty=404, entry update/delete=404/404/cross lab=404/404/404
-First-department and B lab use at same slot is allowed; extra B use exceeds B capacity: PASS - First-department slot=MONDAY/P4, B capacity before=True (None), additional B use after=False (All lab rooms are occupied in this slot.)
-Attendance sessions stay within the HOD department: PASS - create=200, cross get=404, cross start=404
-Attendance reports stay within the HOD department: PASS - B student in B daily report=True, in first-department report=False, cross student/year statuses=404/404
-HOD-B dashboard counts exclude first-department data: PASS - status=200, counts={'academic_years': 3, 'students': 1, 'faculty': 1, 'subjects': 1, 'labs': 1, 'students_face_registered': 0, 'students_face_not_registered': 1}
-OVERALL: PASS (24/24 checks)
-```
-
-## Student and attendance full flow
-
-Fresh-copy run of `backend/scripts/test_full_flow.py`:
-
-```text
-a. Faculty session ownership: PASS - owner start=200, other faculty start=403
-b. Present marks, duplicate rejection, and wrong-year rejection: PASS - student A=200, student B=200, duplicate=400, wrong year=400
-c. Close backfill, closed-session rejection, and reopen after close: PASS - while open second start=400, close=200, absent=6/6, mark after close=400, start after close=200
-d. Student summary matches DB and history omits another student's rows: PASS - summary=200, exact DB match=True, history=200, owned rows exact=True, newest-first=True, subject filter=200/2 of 2, other student's rows present in DB=True
-e. Student role is forbidden from reports, generation, and sessions: PASS - reports=[403, 403, 403, 403], generate=403, sessions=403
-f. Other-department HOD receives 404 for session and report rows: PASS - session=404, report rows=404
-g. Student timetable is limited to the student's academic year: PASS - status=200, rows=11/11, year ids=[1]
-h. /departments/me for HOD: PASS - status=200, department={'id': 1, 'name': 'MCA'}
-h. /departments/me for FACULTY: PASS - status=200, department={'id': 1, 'name': 'MCA'}
-h. /departments/me for STUDENT: PASS - status=200, department={'id': 1, 'name': 'MCA'}
-h. /departments/me for second-department HOD: PASS - status=200, department={'id': 2, 'name': 'MTech'}
-Student self profile: PASS - status=200, body={'name': 'Flow Test Student A', 'roll_number': 'FLOW-A-68a322b600', 'email': 'flow-a-68a322b600@example.invalid', 'academic_year_name': '1st Year', 'department_name': 'MCA', 'face_registered': False}
-OVERALL: PASS (12/12 checks)
+faculty 3rd period allowed: PASS -> 2 existing + candidate = 3
+faculty 15th weekly period allowed: PASS -> 14 existing + candidate = 15
+faculty 4th period rejected: PASS -> 3 existing + candidate = 4
+faculty 16th weekly period rejected: PASS -> 15 existing + candidate = 16
+moving entry within same day avoids double counting: PASS -> excluded id=73; reasons=[]
+unchanged edit passes limits: PASS -> excluded id=73; reasons=[]
+lab block counts three candidate periods: PASS -> daily=3, weekly=3; reasons=[]
+OVERALL: PASS (0 failed checks)
 ```
 
 ## Backtracking regression
 
-Fresh-copy run of `backend/scripts/test_backtracking.py`:
+`scripts/test_backtracking.py` checks all programme years, uniqueness, a greedy trap, an impossible requirement, determinism, and clean regeneration:
 
 ```text
-Year 1st Year (id=1, department_id=1): PASS - required=11, placed=11, rows=11, unscheduled=0, uniqueness_violations=0
-Year 2nd Year (id=2, department_id=1): PASS - required=11, placed=11, rows=11, unscheduled=0, uniqueness_violations=0
-Year 3rd Year (id=3, department_id=1): PASS - required=11, placed=11, rows=11, unscheduled=0, uniqueness_violations=0
-Year 1st Year (id=4, department_id=2): PASS - required=11, placed=11, rows=11, unscheduled=0, uniqueness_violations=0
-Year 2nd Year (id=5, department_id=2): PASS - required=11, placed=11, rows=11, unscheduled=0, uniqueness_violations=0
-a. All MCA/MTech academic years fully schedule: PASS - MCA years=3, MTech years=2, expected total entries=55
-d. Deterministic regeneration: PASS - year_id=1, entries=11, identical=True, nodes/result=11
-e. Regeneration is a clean rebuild; other years untouched: PASS - target rows=11, placed_count=11, other_years_unchanged=True
+Year MCA 1st Year (id=1, department_id=1): PASS - required=21, placed=21, rows=21, unscheduled=0, uniqueness_violations=0
+Year MCA 2nd Year (id=2, department_id=1): PASS - required=15, placed=15, rows=15, unscheduled=0, uniqueness_violations=0
+Year MTech 1st Year (id=4, department_id=1): PASS - required=11, placed=11, rows=11, unscheduled=0, uniqueness_violations=0
+Year MTech 2nd Year (id=5, department_id=1): PASS - required=11, placed=11, rows=11, unscheduled=0, uniqueness_violations=0
+a. All MCA/MTech academic years fully schedule: PASS - MCA years=2, MTech years=2, expected total entries=58
+d. Deterministic regeneration: PASS - year_id=1, entries=21, identical=True, nodes/result=21
+e. Regeneration is a clean rebuild; other years untouched: PASS - target rows=21, placed_count=21, other_years_unchanged=True
 b. Greedy vs backtracking tight case: PASS - greedy placed=6, unscheduled=[{'subject_name': 'Constrained Lab Block', 'reason': 'Could not find a valid 3-consecutive-period slot after trying all days, start periods, and labs.'}]; backtracking placed=9, unscheduled=[]
-c. Impossible fully unavailable requirement terminates with shortfall: PASS - required=3, placed=0, unscheduled=3, nodes=30, max_nodes=50000, elapsed_seconds=0.270, reason=Could not find a valid single-period slot after trying all day/period combinations.
+c. Impossible fully unavailable requirement terminates with shortfall: PASS - required=3, placed=0, unscheduled=3, nodes=30, max_nodes=50000, elapsed_seconds=0.470, reason=Could not find a valid single-period slot after trying all day/period combinations.
 OVERALL: PASS (5/5 checks)
 ```
 
-The MTech seed-generation run reported a passing capacity check and 11 placed entries with no unscheduled blocks for each of its two years:
+The implemented structure has four academic years total (two per programme); the test checks all four.
+
+## Department isolation
+
+`scripts/test_department_isolation.py` checks login ownership, cross-department 404 behavior, department-scoped programme/year and entity routes, department-local lab capacity, timetable generation, attendance, reports, and dashboard counts. Its latest fresh-copy result:
 
 ```text
-Capacity check: PASS (faculty <= 15 and academic years <= 30)
-1st Year: placed_count=11, unscheduled=[], feasibility_warnings={'year_warnings': [], 'faculty_warnings': {}, 'lab_warnings': []}
-2nd Year: placed_count=11, unscheduled=[], feasibility_warnings={'year_warnings': [], 'faculty_warnings': {}, 'lab_warnings': []}
+OVERALL: PASS (24/24 checks)
 ```
 
-The suggested 16-period impossible-case example was not used for the regression: an exploratory run placed 16 entries because the existing faculty daily/weekly checks count already-pending entries before the candidate is added. Those checks and their messages were left unchanged as required; the regression instead verifies an impossible case by marking every faculty slot unavailable.
+The lab-capacity case confirmed that a simultaneous lab slot in a different department does not consume the test department's capacity, while a second use of its only lab room is rejected.
 
-## Test script safety and archived validator output
+## Attendance and student portal full flow
 
-`test_department_isolation.py`, `test_full_flow.py`, and `test_backtracking.py` refuse a database filename other than `smart_attendance.test_copy.db`. `test_validator.py` uses `SessionLocal` and writes fixtures; point its `DATABASE_URL` at a disposable test copy before running. `test_face_libs.py` does not use the application DB but can download a detector model.
+`scripts/test_full_flow.py` checks faculty session ownership, present marks and duplicates, close/backfill behavior, student history and summaries, student role restrictions, cross-department 404s, the student timetable, and `/departments/me`:
 
-`backend/test_runner_utils.py` is a pytest-oriented support/test module containing a mocked DB helper and validator unit tests; it is not the timetable generator. `backend/validator_output.txt` is an older captured validator run with a lab-feasibility FAIL expectation. Its output is stale and is superseded/replaced for reporting purposes by the fresh passing validator run above; the file itself was retained.
+```text
+OVERALL: PASS (12/12 checks)
+```
 
-## UNVERIFIED
+## Programmes and faculty face registration
 
-- Same-person recognition scores across genuinely different camera angles, lighting, and expressions remain unvalidated, as noted in `backend/testing_notes_phase10.md`.
+`scripts/test_programmes.py` checks programme CRUD/scoping, programme-aware academic years (including repeated names across programmes), deletion constraints, faculty face route authorization, zero/multiple-face rejection, re-registration without duplication, and unchanged student `face_data`:
+
+```text
+OVERALL: PASS (17/17 checks)
+```
+
+## Generator helper checks
+
+`scripts/test_generator_loader.py` passed its block-count and remainder-warning checks. `scripts/test_generator_run.py` generated 11 entries twice for its fixture year, left the other year unchanged, and confirmed consistent counts with no duplicates.

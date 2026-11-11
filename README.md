@@ -1,10 +1,10 @@
 # Smart Attendance System
 
-A full-stack student attendance system for the **MCA** and **MTech** programmes. The application uses FastAPI, SQLAlchemy, and SQLite on the backend, with React and Vite on the frontend. It provides department-scoped academic management, timetable generation, attendance sessions, reports, and single-face recognition.
+A full-stack student attendance system for the **Computer Science department**, which contains the **MCA** and **MTech** programmes. The backend uses FastAPI, SQLAlchemy, and SQLite; the frontend uses React and Vite. Features include department-scoped academic management, timetable generation, attendance sessions, reports, student self-service, and student face recognition. Faculty face registration is supported, but faculty face recognition is not implemented.
 
 ## Prerequisites
 
-- Python version compatible with the pinned packages in `backend/requirements.txt` (the face-recognition dependencies currently pin TensorFlow 2.15).
+- Python compatible with the versions pinned in `backend/requirements.txt`.
 - Node.js and npm.
 
 ## Backend setup
@@ -20,31 +20,28 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Set a private `JWT_SECRET_KEY` in `backend/.env`; do not commit real credentials. The example database URL is `sqlite:///./smart_attendance.db`, relative to the backend working directory. Then initialize the database schema and start the API:
+Set a private `JWT_SECRET_KEY` in `backend/.env`; never commit real credentials. The example database URL is `sqlite:///./smart_attendance.db`, relative to the backend working directory. Initialize the schema and start the API:
 
 ```powershell
 python -m app.database.init_db
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-`init_db` calls SQLAlchemy `Base.metadata.create_all`; it creates missing tables, but it is not a schema migration system and does not upgrade existing tables.
+`init_db` imports the models and calls SQLAlchemy `Base.metadata.create_all`. It creates missing tables, but it does not upgrade existing tables and is not a schema migration system.
 
-### Initial department and HOD setup
+### Initial department and HOD
 
-For a new department, create its department row, academic years, and HOD in one script operation:
-
-```powershell
-python scripts/create_department.py --name MCA --hod-username <mca-hod-username>
-python scripts/create_department.py --name MTech --hod-username <mtech-hod-username>
-```
-
-Supply `--hod-password` only through a suitably private process; if omitted, the script generates a password and prints it once. Use names and usernames that are not already present. If adding a HOD and years to an existing **empty** department, use `--use-existing`:
+For a new database, create the department and its first HOD. `create_department.py` also creates a same-named programme; pass an empty `--years` value if you plan to add the MCA and MTech programmes separately:
 
 ```powershell
-python scripts/create_department.py --name <existing-department> --hod-username <username> --use-existing
+python scripts/create_department.py --name "Computer Science" --hod-username <hod-username> --years ""
 ```
 
-The script refuses to populate a non-empty existing department. `scripts/create_hod.py` is a legacy interactive utility that creates an HOD account **without** assigning `department_id`; department-scoped routes require a department assignment, so prefer `create_department.py` for normal setup.
+If `--hod-password` is omitted, the script generates a password and prints it once. Sign in as that HOD and create the MCA and MTech programmes, then create `1st Year` and `2nd Year` in each programme from the programme/academic-year management UI or API. The unused empty `Computer Science` programme can be deleted after setup. To add an HOD and years to an already existing **empty** department, use `--use-existing`; it refuses populated departments.
+
+`scripts/create_hod.py` is a legacy interactive utility that does not assign a department. Department-scoped login requires a department assignment, so use `create_department.py` for initial setup.
+
+The one-time `scripts/migrate_programmes.py` is for the known legacy database baseline and validates its expected face-embedding hash before applying changes. It is not a generic fresh-database initializer. See [test_results.md](./docs/test_results.md) for the current database verification status.
 
 ## Frontend setup
 
@@ -56,37 +53,41 @@ npm install
 npm run dev
 ```
 
-The Vite development server uses `http://localhost:5173`; the frontend API client currently targets `http://localhost:8000`.
+The Vite development server uses `http://localhost:5173`; the frontend API client targets `http://localhost:8000`.
 
 ## Roles
 
-- **HOD**: manages the authenticated department's academic years, students, faculty, subjects, labs, faculty availability, timetable, and attendance/report views.
-- **FACULTY**: works with their own attendance sessions and timetable entries, and can access department-scoped read views and reports limited to their assigned subjects where implemented.
-- **STUDENT**: accesses their own profile, academic-year timetable, and attendance summary/history.
+- **HOD**: manages programmes, academic years, students, faculty, subjects, labs, faculty availability, timetables, attendance sessions, and reports for the HOD's department.
+- **FACULTY**: accesses department-scoped read views, their own timetable and attendance sessions, relevant reports, and can register their own face embedding.
+- **STUDENT**: accesses their profile, academic-year timetable, and attendance summary/history.
 
-Authorization and department ownership are checked by the backend. A department identifier supplied in a request or JWT claim is not the source of ownership.
+Backend dependencies enforce role and ownership checks. Department ownership is derived from the authenticated user's database-backed profile.
 
 ## Main workflows
 
-1. **Department setup and academic data**: an HOD's department contains its academic years, students, faculty, subjects, and labs. Student/faculty creation can optionally create a linked login in the same transaction.
-2. **Timetable generation and editing**: the HOD generates a timetable for an academic year. Lab blocks are placed before theory periods, with feasibility warnings and unscheduled items returned in the response. HODs and faculty members can edit/delete entries subject to backend checks.
-3. **Attendance**: HODs and faculty members start a session from a timetable entry, mark students present manually or request recognition from a one-face image, and close the session. Closing backfills explicit `ABSENT` records for unmarked students in that academic year.
-4. **Face recognition**: an HOD registers or replaces one student's face embedding. Recognition is scoped to students in the attendance session's academic year. A failed or uncertain recognition can be handled through the manual attendance workflow.
-5. **Dashboards and reports**: dashboard and report data are filtered according to the caller's role and department/faculty/student relationship.
+1. **Programme and academic data**: the department contains MCA and MTech; each has its own `1st Year` and `2nd Year`. Years, students, faculty, subjects, and labs are department-scoped.
+2. **Timetable generation and editing**: an HOD generates a timetable for an academic year. The deterministic generator tries lab blocks before theory and uses recursive backtracking up to 50,000 validator calls; results include feasibility warnings and unscheduled items.
+3. **Attendance**: HOD or faculty starts a session from a timetable entry, marks students present manually or requests a recognition result, and closes the session. Closing adds explicit `ABSENT` rows for enrolled students not already marked in that session.
+4. **Face registration and recognition**: an HOD can register a student's face; HOD can register faculty faces and faculty can register their own. Attendance recognition matches only student faces in the session's academic year. Recognition does not save attendance; manual review/marking remains the attendance workflow.
+5. **Dashboards and reports**: dashboard and report data are filtered according to role, department, and faculty/student relationships.
 
 ## Scripts
 
-- `scripts/migrate_add_departments.py`: legacy SQLite migration that creates/backfills department ownership and makes a backup. Review its hard-coded legacy department names before use.
-- `scripts/migrate_add_department_ownership.py`: adds/backfills ownership columns transactionally and verifies the face-embedding hash; it also assumes the legacy department name `Computer Science`.
-- `scripts/create_department.py`: creates a department, years, and HOD, or adds years/HOD to an existing empty department with `--use-existing`.
-- `scripts/seed_mtech_demo.py`: seeds MTech demo records and generates its timetables. It requires the real backend DB and backup and changes data; do not run casually.
-- `scripts/rename_departments.py`: prints a read-only inventory by default; `--apply` changes department names in a transaction.
-- `scripts/test_department_isolation.py`: department-boundary API checks; refuses unless `DATABASE_URL` names `smart_attendance.test_copy.db`.
-- `scripts/test_full_flow.py`: attendance/student portal/API flow checks; refuses unless the configured SQLite DB is `backend/smart_attendance.test_copy.db`.
-- `scripts/test_validator.py`: exercises timetable validator/feasibility checks. It uses the configured database session and writes fixture rows; it does **not** enforce a test-copy filename.
-- `scripts/test_generator_loader.py` and `scripts/test_generator_run.py`: generator loader and regeneration checks. They use the configured database and write fixture/timetable rows; they do **not** enforce a test-copy filename.
-- `scripts/test_face_libs.py`: optional MediaPipe/DeepFace smoke test. It uses an image if present and can download the MediaPipe model; it does not use the application DB.
+- `scripts/migrate_add_departments.py` and `scripts/migrate_add_department_ownership.py`: legacy SQLite schema/ownership migrations; inspect their baseline assumptions and backups before use.
+- `scripts/migrate_programmes.py`: dry-run by default; `--apply` migrates the supported legacy schema to programmes, preserves student face data, and refuses if the expected embedding hash differs.
+- `scripts/create_department.py`: creates a department, a same-named programme, academic years, and HOD, or adds years/HOD to an existing empty department with `--use-existing`.
+- `scripts/create_hod.py`: legacy HOD utility; does not assign a department.
+- `scripts/seed_mca_real.py`: idempotently adds the supplied MCA faculty/users and subjects, checks capacity, and regenerates the two MCA timetables.
+- `scripts/seed_mtech_demo.py`: idempotently adds MTech demo faculty/users, labs, subjects, and students and generates the two MTech timetables. It checks the configured database path and requires the expected backup for the real DB.
+- `scripts/rename_departments.py`: legacy department rename/inventory utility; dry run is the default.
+- `scripts/test_validator.py`: validator and feasibility checks, including candidate-aware faculty limits and edit exclusions.
+- `scripts/test_backtracking.py`: full-year placement, greedy comparison, impossible case, deterministic output, uniqueness, and clean regeneration checks.
+- `scripts/test_department_isolation.py`: cross-department authorization, lab-capacity, attendance, and dashboard isolation checks.
+- `scripts/test_full_flow.py`: attendance session, close/backfill, student portal, and role checks.
+- `scripts/test_programmes.py`: programme CRUD/scoping, academic-year programme ownership, and faculty face-registration checks.
+- `scripts/test_generator_loader.py` and `scripts/test_generator_run.py`: block-loader and regeneration checks.
+- `scripts/test_face_libs.py`: optional MediaPipe/DeepFace smoke test; it may download its detector model and does not use the application database.
 
-For every database-writing test, first make a disposable copy named `smart_attendance.test_copy.db` and set `DATABASE_URL` to that copy from the backend directory. Only the two department/flow scripts enforce that name themselves; the older validator/generator tests must be pointed at the copy manually.
+All database-writing `test_*.py` scripts refuse database filenames other than `smart_attendance.test_copy.db`. Before each test run, create a fresh disposable copy in `backend/` and set `DATABASE_URL` to that copy from the backend working directory. The face-library smoke test does not use the database.
 
 See [`docs/`](./docs/) for the schema, architecture, algorithm, department rules, API inventory, face-recognition notes, and test evidence.

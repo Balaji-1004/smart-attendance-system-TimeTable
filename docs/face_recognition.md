@@ -6,6 +6,8 @@
 
 Zero faces and multiple faces are rejected. For one detected face, `generate_embedding` calls `DeepFace.represent` with `detector_backend="opencv"` and `enforce_detection=False`. No `model_name` is supplied explicitly by this code path. The embedding is converted to float32 bytes by `serialize_embedding` and stored in `face_data.face_embedding`. There is one `FaceData` row per student; a later registration replaces that row's embedding. The endpoint processes one uploaded sample per request; it does not average a set of samples.
 
+Faculty registration uses the same detector, embedding, and serialization helpers, but writes to the separate `faculty_face_data` table. HOD can register a faculty member in the same department with `POST /faculty/{faculty_id}/face-registration`; FACULTY can register or replace only their own embedding with `POST /faculty/me/face-registration`. HOD can read registration status with `GET /faculty/{faculty_id}/face-registration-status`. Registration still requires exactly one detected face. Faculty embeddings are not used by the attendance recognition endpoint; faculty recognition is not implemented.
+
 ## Recognition during attendance
 
 `POST /attendance-sessions/{session_id}/recognize` accepts a multipart `file`. It requires HOD or FACULTY, verifies session department/faculty ownership, and rejects closed sessions. The same MediaPipe single-face check is applied:

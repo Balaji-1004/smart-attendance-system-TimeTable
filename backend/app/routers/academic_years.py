@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_user_department_id, require_role
 from app.database.database import get_db
-from app.models import AcademicYear, Department, User
+from app.models import AcademicYear, Programme, User
 from app.schemas.academic_year import AcademicYearCreate, AcademicYearResponse
 
 router = APIRouter(prefix="/academic-years", tags=["academic-years"])
@@ -17,14 +17,19 @@ def create_academic_year(
     current_user: User = Depends(require_role("HOD")),
 ):
     department_id = get_user_department_id(db, current_user)
-    if payload.department_id != department_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Academic year department must match your department.")
+    programme = (
+        db.query(Programme)
+        .filter(Programme.id == payload.programme_id, Programme.department_id == department_id)
+        .first()
+    )
+    if programme is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Programme not found")
 
-    department = db.query(Department).filter(Department.id == department_id).first()
-    if department is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
-
-    obj = AcademicYear(department_id=department_id, name=payload.name.strip())
+    obj = AcademicYear(
+        department_id=department_id,
+        programme_id=programme.id,
+        name=payload.name.strip(),
+    )
     try:
         db.add(obj)
         db.commit()
@@ -34,22 +39,28 @@ def create_academic_year(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Academic year '{payload.name.strip()}' already exists for this department.",
+            detail=f"Academic year '{payload.name.strip()}' already exists for this programme.",
         )
 
 
 @router.get("", response_model=list[AcademicYearResponse])
 def list_academic_years(
+    programme_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("HOD", "FACULTY")),
 ):
     department_id = get_user_department_id(db, current_user)
-    return (
-        db.query(AcademicYear)
-        .filter(AcademicYear.department_id == department_id)
-        .order_by(AcademicYear.created_at.desc())
-        .all()
-    )
+    query = db.query(AcademicYear).filter(AcademicYear.department_id == department_id)
+    if programme_id is not None:
+        programme = (
+            db.query(Programme)
+            .filter(Programme.id == programme_id, Programme.department_id == department_id)
+            .first()
+        )
+        if programme is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Programme not found")
+        query = query.filter(AcademicYear.programme_id == programme_id)
+    return query.order_by(AcademicYear.created_at.desc()).all()
 
 
 @router.get("/{academic_year_id}", response_model=AcademicYearResponse)
@@ -76,10 +87,15 @@ def update_academic_year(
     obj = db.query(AcademicYear).filter(AcademicYear.id == academic_year_id).first()
     if obj is None or obj.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
-    if payload.department_id != department_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Academic year department must match your department.")
-
+    programme = (
+        db.query(Programme)
+        .filter(Programme.id == payload.programme_id, Programme.department_id == department_id)
+        .first()
+    )
+    if programme is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Programme not found")
     obj.department_id = department_id
+    obj.programme_id = programme.id
     obj.name = payload.name.strip()
     try:
         db.commit()
@@ -89,7 +105,7 @@ def update_academic_year(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Academic year '{payload.name.strip()}' already exists for this department.",
+            detail=f"Academic year '{payload.name.strip()}' already exists for this programme.",
         )
 
 

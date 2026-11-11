@@ -18,6 +18,7 @@ class DashboardCounts(BaseModel):
 class YearDashboardSummary(BaseModel):
     academic_year_id: int
     name: str
+    programme_name: str
     student_count: int
     subject_count: int
     timetable_entries_count: int
@@ -42,6 +43,7 @@ class RecentSessionSummary(BaseModel):
     subject_name: str
     faculty_name: str
     academic_year_name: str
+    programme_name: str
     present_count: int
     absent_count: int
 
@@ -52,6 +54,7 @@ class FacultyScheduleItem(BaseModel):
     period: str
     subject_name: str
     academic_year_name: str
+    programme_name: str
     lab_name: Optional[str] = None
 
 
@@ -60,6 +63,7 @@ class FacultySessionSummary(BaseModel):
     date: str
     subject_name: str
     academic_year_name: str
+    programme_name: str
     status: str
     present_count: int
     absent_count: int
@@ -101,12 +105,14 @@ class StudentScheduleItem(BaseModel):
     subject_name: str
     faculty_name: str
     academic_year_name: str
+    programme_name: str
 
 
 class StudentDashboardResponse(BaseModel):
     student_name: str
     roll_number: str
     academic_year_name: str
+    programme_name: str
     attendance: StudentAttendanceSummary
     subject_count: int
     class_count: int
@@ -119,6 +125,7 @@ class LowAttendanceStudent(BaseModel):
     name: str
     roll_number: str
     academic_year_name: str
+    programme_name: str
     percentage: float
 
 

@@ -39,6 +39,8 @@ def _row_response(row: Attendance) -> AttendanceReportRow:
         subject_name=row.subject.name,
         faculty_id=row.faculty_id,
         academic_year_id=row.academic_year_id,
+        academic_year_name=row.academic_year.name,
+        programme_name=row.academic_year.programme.name,
         date=row.date,
         time=row.time,
         status=row.status,
@@ -114,6 +116,8 @@ def subject_attendance_report(
         StudentAttendanceSummary(
             student_id=student.id,
             student_name=student.name,
+            academic_year_name=subject.academic_year.name,
+            programme_name=subject.academic_year.programme.name,
             present_count=counts_by_student[student.id]["present"],
             total_count=counts_by_student[student.id]["total"],
             percentage=(
@@ -208,6 +212,8 @@ def class_attendance_summary(
         ClassAttendanceSummary(
             subject_id=subject.id,
             subject_name=subject.name,
+            academic_year_name=academic_year.name,
+            programme_name=academic_year.programme.name,
             present_count=counts[subject.id]["present"],
             absent_count=counts[subject.id]["absent"],
             total_count=counts[subject.id]["present"] + counts[subject.id]["absent"],

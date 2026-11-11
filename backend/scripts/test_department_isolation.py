@@ -144,12 +144,14 @@ def new_test_data(db):
         username="test-dept-b-faculty",
         password_hash=hash_password("test-password"),
         role=Role.FACULTY,
+        department_id=test_department.id,
         faculty_id=faculty.id,
     )
     student_user = User(
         username="test-dept-b-student",
         password_hash=hash_password("test-password"),
         role=Role.STUDENT,
+        department_id=test_department.id,
         student_id=student.id,
     )
     db.add_all((subject, faculty_user, student_user))
@@ -167,6 +169,7 @@ def new_test_data(db):
         "cs_department_id": cs_department.id,
         "cs_hod_token": token_for(cs_hod),
         "cs_year_id": cs_year.id,
+        "cs_programme_id": cs_year.programme_id,
         "cs_student_id": cs_student.id,
         "cs_faculty_id": cs_faculty.id,
         "cs_subject_id": cs_subject.id,
@@ -178,6 +181,7 @@ def new_test_data(db):
         "faculty_username": faculty_user.username,
         "student_username": student_user.username,
         "year_id": year.id,
+        "programme_id": year.programme_id,
         "student_id": student.id,
         "faculty_id": faculty.id,
         "subject_id": subject.id,
@@ -222,7 +226,7 @@ def run():
     hod_cs_headers = {"Authorization": f"Bearer {data['cs_hod_token']}"}
 
     resource_specs = [
-        ("academic-years", data["cs_year_id"], {"department_id": data["cs_department_id"], "name": "Changed"}),
+        ("academic-years", data["cs_year_id"], {"programme_id": data["cs_programme_id"], "name": "Changed"}),
         ("students", data["cs_student_id"], {"name": "Changed"}),
         ("faculty", data["cs_faculty_id"], {"name": "Changed"}),
         ("subjects", data["cs_subject_id"], {"name": "Changed"}),
@@ -265,7 +269,7 @@ def run():
                 client, hod_b_headers, "HOD-B cannot access first department", f"/{endpoint}", record_id, payload
             ))
         for endpoint, record_id, payload in [
-            ("academic-years", data["year_id"], {"department_id": data["department_id"], "name": "Changed"}),
+            ("academic-years", data["year_id"], {"programme_id": data["programme_id"], "name": "Changed"}),
             ("students", data["student_id"], {"name": "Changed"}),
             ("faculty", data["faculty_id"], {"name": "Changed"}),
             ("subjects", data["subject_id"], {"name": "Changed"}),
@@ -353,13 +357,13 @@ def run():
 
         mismatch_year = client.post(
             "/academic-years",
-            json={"department_id": data["cs_department_id"], "name": "Mismatch year"},
+            json={"programme_id": data["cs_programme_id"], "name": "Mismatch year"},
             headers=hod_b_headers,
         )
-        passed.append(mismatch_year.status_code == 403)
+        passed.append(mismatch_year.status_code == 404)
         report(
-            "Mismatched academic-year department is rejected",
-            mismatch_year.status_code == 403,
+            "Cross-department academic-year programme is rejected",
+            mismatch_year.status_code == 404,
             f"status={mismatch_year.status_code}",
         )
         cross_year_subject_update = client.put(
@@ -491,28 +495,27 @@ def run():
             f"{cs_entry_delete.status_code}/{b_entry_delete.status_code if b_entry_delete else 'n/a'}",
         )
 
-        cs_lab_slot = (
+        cs_lab_slots = (
             db.query(TimetableEntry)
             .join(Lab, Lab.id == TimetableEntry.lab_id)
             .filter(Lab.department_id == data["cs_department_id"])
             .order_by(TimetableEntry.id)
-            .first()
+            .all()
         )
         candidate_slot = None
-        if cs_lab_slot is not None:
-            for period in (cs_lab_slot.period,):
-                occupied_in_b_year = (
-                    db.query(TimetableEntry)
-                    .filter(
-                        TimetableEntry.academic_year_id == data["year_id"],
-                        TimetableEntry.day == cs_lab_slot.day,
-                        TimetableEntry.period == period,
-                    )
-                    .first()
+        for cs_lab_slot in cs_lab_slots:
+            occupied_in_b_year = (
+                db.query(TimetableEntry)
+                .filter(
+                    TimetableEntry.academic_year_id == data["year_id"],
+                    TimetableEntry.day == cs_lab_slot.day,
+                    TimetableEntry.period == cs_lab_slot.period,
                 )
-                if occupied_in_b_year is None:
-                    candidate_slot = (cs_lab_slot.day, period)
-                    break
+                .first()
+            )
+            if occupied_in_b_year is None:
+                candidate_slot = (cs_lab_slot.day, cs_lab_slot.period)
+                break
 
         if candidate_slot is None:
             passed.append(False)

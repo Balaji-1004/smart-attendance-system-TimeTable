@@ -9,7 +9,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.core.security import hash_password
 from app.database.database import SessionLocal
-from app.models import AcademicYear, Department, Faculty, Lab, Student, Subject, User
+from app.models import AcademicYear, Department, Faculty, Lab, Programme, Student, Subject, User
 from app.models.user import Role
 
 
@@ -54,8 +54,21 @@ def create_department(db, name, hod_username, hod_password=None, years=None, use
         password = hod_password or secrets.token_urlsafe(16)
         year_names = years or ["1st Year", "2nd Year", "3rd Year"]
         try:
+            programme = (
+                db.query(Programme)
+                .filter(Programme.department_id == department.id, Programme.name == name)
+                .first()
+            )
+            if programme is None:
+                programme = Programme(department_id=department.id, name=name)
+                db.add(programme)
+                db.flush()
             db.add_all(
-                AcademicYear(department_id=department.id, name=year_name)
+                AcademicYear(
+                    department_id=department.id,
+                    programme_id=programme.id,
+                    name=year_name,
+                )
                 for year_name in year_names
             )
             db.add(
@@ -85,8 +98,15 @@ def create_department(db, name, hod_username, hod_password=None, years=None, use
     try:
         db.add(department)
         db.flush()
+        programme = Programme(department_id=department.id, name=name)
+        db.add(programme)
+        db.flush()
         db.add_all(
-            AcademicYear(department_id=department.id, name=year_name)
+            AcademicYear(
+                department_id=department.id,
+                programme_id=programme.id,
+                name=year_name,
+            )
             for year_name in year_names
         )
         db.add(

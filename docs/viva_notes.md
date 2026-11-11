@@ -1,7 +1,7 @@
 # Viva preparation: likely questions
 
 1. **What problem does the project address and what technologies does it use?**  
-   It manages department academic data, timetables, attendance sessions, reports, and student self-service for MCA and MTech. The backend uses FastAPI, SQLAlchemy, and SQLite; the frontend uses React/Vite; authentication uses JWT; face processing uses MediaPipe and DeepFace.
+   It manages one Computer Science department containing MCA and MTech programmes, including academic data, timetables, attendance sessions, reports, and student self-service. The backend uses FastAPI, SQLAlchemy, and SQLite; the frontend uses React/Vite; authentication uses JWT; face processing uses MediaPipe and DeepFace.
 
 2. **What are the three roles?**  
    HOD, FACULTY, and STUDENT. Backend dependencies enforce role access independently of frontend route restrictions.
@@ -13,10 +13,10 @@
    `get_user_department_id` reads the HOD's user department or follows the faculty/student profile foreign key to that profile's department.
 
 5. **Why return 404 for cross-department records?**  
-   Returning 404 avoids revealing another department's records; 403 is reserved for a role or ownership action that is explicitly forbidden. The client-supplied department id does not establish authorization; the backend derives department ownership from the authenticated user's database-backed profile.
+   Returning 404 avoids revealing another department's records; 403 is reserved for roles or ownership actions explicitly forbidden. The client-supplied department id does not establish authorization.
 
-6. **How are database tables initialized?**  
-   `python -m app.database.init_db` invokes SQLAlchemy `Base.metadata.create_all`; this creates missing tables but is not a migration framework.
+6. **How are database tables initialized, and how are programmes related to years?**
+   `init_db` invokes SQLAlchemy `Base.metadata.create_all`; it creates missing tables but does not upgrade existing tables. The repository has targeted SQLite migrations, not Alembic. A programme belongs to a department, and each academic year belongs to both; `1st Year` can exist in both MCA and MTech.
 
 7. **How are lab blocks represented?**  
    Each complete set of three weekly lab periods creates a three-period block. Any remainder is reported and left unscheduled.
@@ -37,7 +37,7 @@
     Validator checks reject occupied year, faculty, and lab slots; database unique constraints also protect year/day/period, faculty/day/period, and lab/day/period.
 
 13. **What faculty load limits are checked?**  
-    The validator limits a faculty member to 3 scheduled periods per day and 15 per week. Feasibility checks also report subject weekly requirements above 15.
+    The validator limits a faculty member to 3 scheduled periods per day and 15 per week, counting the candidate. Existing and pending rows are deduplicated by entry id, and moved entries are excluded from both sources.
 
 14. **How is lab capacity separated across departments?**  
     Generation supplies the academic year's department id; lab ids and existing occupied slots are filtered to labs owned by that department.
@@ -57,8 +57,8 @@
 19. **Does recognition itself save attendance?**  
     No. It returns a recognition result; the operator must separately submit a manual mark request after review.
 
-20. **What does MediaPipe do in the face workflow?**  
-    The MediaPipe Tasks face detector checks for exactly one face before embedding extraction.
+20. **What does MediaPipe do, and how does faculty face registration work?**
+    MediaPipe Tasks checks for exactly one face before embedding extraction. HOD can register a department faculty face, and faculty can register their own. Those embeddings are stored separately and are not used in attendance matching; faculty recognition is not implemented.
 
 21. **What does DeepFace do?**  
     The route calls `DeepFace.represent` on the image to compute an embedding; the code does not explicitly pass a model name.

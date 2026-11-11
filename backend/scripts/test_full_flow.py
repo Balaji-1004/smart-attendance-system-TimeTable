@@ -92,7 +92,9 @@ def prepare_fixtures(db):
         .first()
     )
     if other_department is None:
-        raise RuntimeError("A second department is required for the isolation checks.")
+        other_department = Department(name=f"Flow Isolation {uuid4().hex[:8]}")
+        db.add(other_department)
+        db.flush()
     other_hod = get_or_create_other_department_hod(db, other_department)
 
     today = date.today()
@@ -177,6 +179,7 @@ def prepare_fixtures(db):
         username=f"flow.student.{suffix}",
         password_hash=hash_password(f"flow-{suffix}-password"),
         role=Role.STUDENT,
+        department_id=cs_department.id,
         student_id=student_a.id,
     )
     db.add(student_user)
@@ -211,6 +214,7 @@ def prepare_fixtures(db):
         "student_b": student_b,
         "other_year_student": other_year_student,
         "year": year,
+        "programme_name": year.programme.name,
         "entry": entry,
         "subject_name": entry.subject.name,
     }
@@ -571,6 +575,7 @@ def run():
             and profile.get("name") == data["student_a"].name
             and profile.get("roll_number") == data["student_a"].roll_number
             and profile.get("academic_year_name") == data["year"].name
+            and profile.get("programme_name") == data["programme_name"]
             and profile.get("department_name") == data["department"].name
             and profile.get("face_registered") is False
         )

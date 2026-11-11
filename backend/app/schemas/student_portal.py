@@ -10,6 +10,7 @@ class StudentProfileResponse(BaseModel):
     roll_number: str
     email: str
     academic_year_name: str
+    programme_name: str
     department_name: str
     face_registered: bool
 

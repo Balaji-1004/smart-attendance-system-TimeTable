@@ -19,6 +19,7 @@ from app.models import (
     Faculty,
     FacultyAvailability,
     Lab,
+    Programme,
     Student,
     Subject,
     TimetableEntry,
@@ -130,16 +131,41 @@ def reset_for_demo():
             db.add(department)
             db.flush()
 
+        programmes = {}
+        for name in ("MCA", "MTech"):
+            programme = (
+                db.query(Programme)
+                .filter(Programme.department_id == department.id, Programme.name == name)
+                .first()
+            )
+            if programme is None:
+                programme = Programme(department_id=department.id, name=name)
+                db.add(programme)
+                db.flush()
+            programmes[name] = programme
+
         academic_years = {}
-        for name in ("1st Year", "2nd Year", "3rd Year"):
-            academic_year = AcademicYear(department_id=department.id, name=name)
+        for name in ("1st Year", "2nd Year"):
+            academic_year = AcademicYear(
+                department_id=department.id,
+                programme_id=programmes["MCA"].id,
+                name=name,
+            )
             db.add(academic_year)
             db.flush()
             academic_years[name] = academic_year
+            db.add(
+                AcademicYear(
+                    department_id=department.id,
+                    programme_id=programmes["MTech"].id,
+                    name=name,
+                )
+            )
 
         faculty_members = []
         for details in FACULTY_DEFINITIONS:
             faculty = Faculty(
+                department_id=department.id,
                 name=details["name"],
                 faculty_code=details["faculty_code"],
                 email=details["email"],
@@ -149,6 +175,7 @@ def reset_for_demo():
             password = make_password()
             db.add(
                 User(
+                    department_id=department.id,
                     username=details["username"],
                     password_hash=hash_password(password),
                     role=Role.FACULTY,
@@ -159,8 +186,8 @@ def reset_for_demo():
             credentials[details["username"]] = password
 
         labs = [
-            Lab(lab_code="LAB-001", name="Computer Lab 1"),
-            Lab(lab_code="LAB-002", name="Computer Lab 2"),
+            Lab(department_id=department.id, lab_code="LAB-001", name="Computer Lab 1"),
+            Lab(department_id=department.id, lab_code="LAB-002", name="Computer Lab 2"),
         ]
         db.add_all(labs)
 
@@ -168,6 +195,7 @@ def reset_for_demo():
         hod_password = make_password()
         db.add(
             User(
+                department_id=department.id,
                 username=hod_username,
                 password_hash=hash_password(hod_password),
                 role=Role.HOD,
@@ -177,13 +205,13 @@ def reset_for_demo():
         )
         credentials[hod_username] = hod_password
 
-        for year_index, year_name in enumerate(("1st Year", "2nd Year", "3rd Year"), start=1):
+        for year_index, year_name in enumerate(("1st Year", "2nd Year"), start=1):
             year = academic_years[year_name]
             # The primary Java/DBMS instructor covers Java in every year and DBMS
             # in Years 1–2; the AI instructor takes Year 3 DBMS to keep each
             # instructor within the generator's 15-period feasibility limit.
             theory_faculty = faculty_members[0]
-            dbms_faculty = faculty_members[1] if year_index == 3 else faculty_members[0]
+            dbms_faculty = faculty_members[0]
             subjects = [
                 Subject(
                     academic_year_id=year.id,
@@ -246,6 +274,7 @@ def reset_for_demo():
                 student_username = "demo.student"
                 student_password = make_password()
                 student_user = User(
+                    department_id=department.id,
                     username=student_username,
                     password_hash=hash_password(student_password),
                     role=Role.STUDENT,
@@ -259,7 +288,7 @@ def reset_for_demo():
 
         db.commit()
 
-        for year_name in ("1st Year", "2nd Year", "3rd Year"):
+        for year_name in ("1st Year", "2nd Year"):
             result = generate_timetable(db, academic_years[year_name].id)
             timetable_results.append((year_name, result))
             print(

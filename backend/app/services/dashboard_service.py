@@ -5,7 +5,7 @@ from datetime import date
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from app.models import AcademicYear, Attendance, AttendanceSession, Faculty, Lab, Student, Subject, TimetableEntry
+from app.models import AcademicYear, Attendance, AttendanceSession, Faculty, Lab, Programme, Student, Subject, TimetableEntry
 from app.models.enums import AttendanceStatus, SessionStatus
 
 
@@ -91,12 +91,14 @@ def get_hod_dashboard(db: Session, department_id: int) -> dict:
         db.query(
             AcademicYear.id.label("academic_year_id"),
             AcademicYear.name.label("name"),
+            Programme.name.label("programme_name"),
             student_count.label("student_count"),
             subject_count.label("subject_count"),
             timetable_entries_count.label("timetable_entries_count"),
             expected_weekly_periods.label("expected_weekly_periods"),
             face_registered_count.label("face_registered_count"),
         )
+        .join(Programme, Programme.id == AcademicYear.programme_id)
         .filter(AcademicYear.department_id == department_id)
         .order_by(AcademicYear.id.asc())
         .all()
@@ -126,6 +128,7 @@ def get_hod_dashboard(db: Session, department_id: int) -> dict:
         summary = {
             "academic_year_id": row.academic_year_id,
             "name": row.name,
+            "programme_name": row.programme_name,
             "student_count": int(row.student_count or 0),
             "subject_count": int(row.subject_count or 0),
             "timetable_entries_count": int(row.timetable_entries_count or 0),
@@ -176,10 +179,12 @@ def get_hod_dashboard(db: Session, department_id: int) -> dict:
             Subject.name.label("subject_name"),
             Faculty.name.label("faculty_name"),
             AcademicYear.name.label("academic_year_name"),
+            Programme.name.label("programme_name"),
         )
         .join(Subject, Subject.id == AttendanceSession.subject_id)
         .join(Faculty, Faculty.id == AttendanceSession.faculty_id)
         .join(AcademicYear, AcademicYear.id == AttendanceSession.academic_year_id)
+        .join(Programme, Programme.id == AcademicYear.programme_id)
         .filter(AcademicYear.department_id == department_id)
         .order_by(AttendanceSession.date.desc(), AttendanceSession.id.desc())
         .limit(5)
@@ -213,6 +218,7 @@ def get_hod_dashboard(db: Session, department_id: int) -> dict:
             "subject_name": row.subject_name,
             "faculty_name": row.faculty_name,
             "academic_year_name": row.academic_year_name,
+            "programme_name": row.programme_name,
             "present_count": counts_for_session["present_count"],
             "absent_count": counts_for_session["absent_count"],
         })
@@ -223,14 +229,16 @@ def get_hod_dashboard(db: Session, department_id: int) -> dict:
             Student.name,
             Student.roll_number,
             AcademicYear.name.label("academic_year_name"),
+            Programme.name.label("programme_name"),
             func.sum(case((Attendance.status == AttendanceStatus.PRESENT, 1), else_=0)).label("present_count"),
             func.sum(case((Attendance.status == AttendanceStatus.ABSENT, 1), else_=0)).label("absent_count"),
             func.count(Attendance.id).label("attendance_total"),
         )
         .join(AcademicYear, AcademicYear.id == Student.academic_year_id)
+        .join(Programme, Programme.id == AcademicYear.programme_id)
         .outerjoin(Attendance, Attendance.student_id == Student.id)
         .filter(Student.department_id == department_id)
-        .group_by(Student.id, Student.name, Student.roll_number, AcademicYear.name)
+        .group_by(Student.id, Student.name, Student.roll_number, AcademicYear.name, Programme.name)
         .having(func.count(Attendance.id) > 0)
         .all()
     )
@@ -248,6 +256,7 @@ def get_hod_dashboard(db: Session, department_id: int) -> dict:
                     "name": row.name,
                     "roll_number": row.roll_number,
                     "academic_year_name": row.academic_year_name,
+                    "programme_name": row.programme_name,
                     "percentage": percentage,
                 }
             )
@@ -270,6 +279,7 @@ def get_hod_dashboard(db: Session, department_id: int) -> dict:
             {
                 "academic_year_id": row["academic_year_id"],
                 "name": row["name"],
+                "programme_name": row["programme_name"],
                 "student_count": row["student_count"],
                 "subject_count": row["subject_count"],
                 "timetable_entries_count": row["timetable_entries_count"],
@@ -287,6 +297,7 @@ def get_hod_dashboard(db: Session, department_id: int) -> dict:
                 "name": row["name"],
                 "roll_number": row["roll_number"],
                 "academic_year_name": row["academic_year_name"],
+                "programme_name": row["programme_name"],
                 "percentage": row["percentage"],
             }
             for row in low_attendance_students

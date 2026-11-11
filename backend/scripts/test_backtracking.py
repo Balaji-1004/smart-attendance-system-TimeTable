@@ -16,6 +16,7 @@ from app.models import (
     Faculty,
     FacultyAvailability,
     Lab,
+    Programme,
     Subject,
     TimetableEntry,
 )
@@ -129,7 +130,14 @@ def create_greedy_trap(db):
     department = Department(name="Backtracking Regression Dept")
     db.add(department)
     db.flush()
-    year = AcademicYear(department_id=department.id, name="Backtracking Year")
+    programme = Programme(department_id=department.id, name="Regression")
+    db.add(programme)
+    db.flush()
+    year = AcademicYear(
+        department_id=department.id,
+        programme_id=programme.id,
+        name="Backtracking Year",
+    )
     db.add(year)
     first_faculty = Faculty(
         department_id=department.id,
@@ -196,7 +204,14 @@ def create_impossible_case(db):
     department = Department(name="Backtracking Impossible Dept")
     db.add(department)
     db.flush()
-    year = AcademicYear(department_id=department.id, name="Impossible Year")
+    programme = Programme(department_id=department.id, name="Regression")
+    db.add(programme)
+    db.flush()
+    year = AcademicYear(
+        department_id=department.id,
+        programme_id=programme.id,
+        name="Impossible Year",
+    )
     faculty = Faculty(
         department_id=department.id,
         name="Overloaded Faculty",
@@ -229,22 +244,24 @@ def main():
     db = SessionLocal()
     failures = 0
     try:
-        departments = {
-            department.name: department.id
-            for department in db.query(Department).filter(Department.name.in_(("MCA", "MTech"))).all()
+        programmes = {
+            programme.name: programme.id
+            for programme in db.query(Programme)
+            .filter(Programme.name.in_(("MCA", "MTech")))
+            .all()
         }
         years = (
             db.query(AcademicYear)
-            .filter(AcademicYear.department_id.in_(departments.values()))
-            .order_by(AcademicYear.department_id, AcademicYear.id)
+            .filter(AcademicYear.programme_id.in_(programmes.values()))
+            .order_by(AcademicYear.programme_id, AcademicYear.id)
             .all()
         )
-        target_year_count = sum(1 for year in years if year.department_id == departments.get("MCA"))
-        mtech_year_count = sum(1 for year in years if year.department_id == departments.get("MTech"))
+        target_year_count = sum(1 for year in years if year.programme.name == "MCA")
+        mtech_year_count = sum(1 for year in years if year.programme.name == "MTech")
 
         year_results = {}
         expected_year_count = 0
-        all_years_ok = target_year_count == 3 and mtech_year_count == 2 and len(years) == 5
+        all_years_ok = target_year_count == 2 and mtech_year_count == 2 and len(years) == 4
         for year in years:
             expected = required_entry_count(db, year.id)
             expected_year_count += expected
@@ -257,7 +274,7 @@ def main():
             year_ok = result["placed_count"] == expected and not result["unscheduled"] and actual == expected and violations == 0
             all_years_ok = all_years_ok and year_ok
             print(
-                f"Year {year.name} (id={year.id}, department_id={year.department_id}): "
+                f"Year {year.programme.name} {year.name} (id={year.id}, department_id={year.department_id}): "
                 f"{'PASS' if year_ok else 'FAIL'} - required={expected}, placed={result['placed_count']}, "
                 f"rows={actual}, unscheduled={len(result['unscheduled'])}, uniqueness_violations={violations}"
             )
@@ -269,7 +286,7 @@ def main():
         failures += not all_years_ok
 
         first_mca_year = next(
-            (year for year in years if year.department_id == departments.get("MCA")),
+            (year for year in years if year.programme.name == "MCA"),
             None,
         )
         determinism_ok = first_mca_year is not None

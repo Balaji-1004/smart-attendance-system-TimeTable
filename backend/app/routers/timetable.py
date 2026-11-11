@@ -49,6 +49,7 @@ def _entry_to_department_response(entry: TimetableEntry) -> DepartmentTimetableE
         lab_id=response.lab_id,
         lab_name=response.lab_name,
         academic_year_name=entry.academic_year.name,
+        programme_name=entry.academic_year.programme.name,
     )
 
 

@@ -17,6 +17,8 @@ class AttendanceReportRow(BaseModel):
     subject_name: str
     faculty_id: int
     academic_year_id: int
+    academic_year_name: str
+    programme_name: str
     date: date
     time: datetime
     status: AttendanceStatus
@@ -26,6 +28,8 @@ class AttendanceReportRow(BaseModel):
 class StudentAttendanceSummary(BaseModel):
     student_id: int
     student_name: str
+    academic_year_name: str
+    programme_name: str
     present_count: int
     total_count: int
     percentage: float
@@ -43,6 +47,8 @@ class SubjectAttendanceSummary(BaseModel):
 class ClassAttendanceSummary(BaseModel):
     subject_id: int
     subject_name: str
+    academic_year_name: str
+    programme_name: str
     present_count: int
     absent_count: int
     total_count: int
