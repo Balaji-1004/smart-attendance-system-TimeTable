@@ -9,6 +9,7 @@ import EmptyState from '../components/ui/EmptyState';
 import PageHeader from '../components/ui/PageHeader';
 import Spinner from '../components/ui/Spinner';
 import StatCard from '../components/ui/StatCard';
+import { yearLabel } from '../utils/labels';
 
 function percentStyle(value) {
   if (value == null) return { width: '0%', background: '#e5e7eb' };
@@ -61,6 +62,11 @@ export default function HODDashboard() {
   if (!data) {
     return <EmptyState title="No dashboard data" description="No dashboard metrics are available yet." />;
   }
+
+  const getYearLabel = (yearId, name, programmeName) => {
+    const year = data.years.find((item) => Number(item.academic_year_id ?? item.id) === Number(yearId));
+    return yearLabel(year || { name, programme_name: programmeName });
+  };
 
   return (
     <>
@@ -122,7 +128,7 @@ export default function HODDashboard() {
               return (
                 <div key={year.academic_year_id} className="year-card">
                   <div className="year-card__header">
-                    <h4>{year.name}</h4>
+                    <h4>{yearLabel(year)}</h4>
                     <div className="year-card__actions">
                       <Link to="/timetable"><Button variant="secondary">View timetable</Button></Link>
                       <Link to="/attendance"><Button variant="secondary">Open attendance</Button></Link>
@@ -183,7 +189,7 @@ export default function HODDashboard() {
                       <td><Badge tone={session.status === 'OPEN' ? 'warning' : 'success'}>{session.status}</Badge></td>
                       <td>{session.subject_name}</td>
                       <td>{session.faculty_name}</td>
-                      <td>{session.academic_year_name}</td>
+                      <td>{getYearLabel(session.academic_year_id, session.academic_year_name, session.programme_name)}</td>
                       <td>{session.present_count}</td>
                       <td>{session.absent_count}</td>
                     </tr>
@@ -214,7 +220,7 @@ export default function HODDashboard() {
                   {data.low_attendance_students.map((student) => (
                     <tr key={student.student_id}>
                       <td>{student.name} ({student.roll_number})</td>
-                      <td>{student.academic_year_name}</td>
+                      <td>{getYearLabel(student.academic_year_id, student.academic_year_name, student.programme_name)}</td>
                       <td><Badge tone="warning">{student.percentage.toFixed(1)}%</Badge></td>
                     </tr>
                   ))}

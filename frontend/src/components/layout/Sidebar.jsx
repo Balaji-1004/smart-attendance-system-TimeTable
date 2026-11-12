@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 const navConfig = {
   HOD: [
     { to: '/hod/dashboard', label: 'Dashboard' },
+    { to: '/programmes', label: 'Programmes' },
     { to: '/academic-years', label: 'Academic Years' },
     { to: '/faculty', label: 'Faculty' },
     { to: '/subjects', label: 'Subjects' },
@@ -24,6 +25,7 @@ const navConfig = {
     { to: '/timetable/faculty', label: 'Year Timetable' },
     { to: '/attendance', label: 'Attendance' },
     { to: '/reports', label: 'Reports' },
+    { to: '/my-face-registration', label: 'My Face Registration' },
   ],
   STUDENT: [
     { to: '/student/dashboard', label: 'Dashboard' },

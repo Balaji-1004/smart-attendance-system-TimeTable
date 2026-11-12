@@ -2,12 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
-export default function FaceRegistration() {
+export default function FaceRegistration({ mode = 'hod' }) {
   const { token } = useAuth();
+  const isSelf = mode === 'self';
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [students, setStudents] = useState([]);
-  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [faculty, setFaculty] = useState([]);
+  const [registrationType, setRegistrationType] = useState('student');
+  const selectedType = isSelf ? 'faculty' : registrationType;
+  const targets = selectedType === 'student' ? students : faculty;
+  const [selectedTargetId, setSelectedTargetId] = useState('');
   const [loadingStudents, setLoadingStudents] = useState(true);
   const [cameraActive, setCameraActive] = useState(false);
   const [capturedImageUrl, setCapturedImageUrl] = useState('');
@@ -20,24 +25,27 @@ export default function FaceRegistration() {
   useEffect(() => {
     let cancelled = false;
 
-    const fetchStudents = async () => {
+    const fetchTargets = async () => {
+      if (isSelf) {
+        setLoadingStudents(false);
+        return;
+      }
       if (!token) {
         setLoadingStudents(false);
         return;
       }
 
       try {
-        const response = await api.get('/students');
+        const response = await api.get(selectedType === 'student' ? '/students' : '/faculty');
         if (!cancelled) {
           const items = response.data || [];
-          setStudents(items);
-          if (items.length > 0 && !selectedStudentId) {
-            setSelectedStudentId(String(items[0].id));
-          }
+          if (selectedType === 'student') setStudents(items);
+          else setFaculty(items);
+          setSelectedTargetId(items.length ? String(items[0].id) : '');
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err?.response?.data?.detail || 'Failed to load students.');
+          setError(err?.response?.data?.detail || `Failed to load ${selectedType === 'student' ? 'students' : 'faculty'}.`);
         }
       } finally {
         if (!cancelled) {
@@ -46,12 +54,13 @@ export default function FaceRegistration() {
       }
     };
 
-    fetchStudents();
+    setLoadingStudents(true);
+    fetchTargets();
 
     return () => {
       cancelled = true;
     };
-  }, [token, selectedStudentId]);
+  }, [isSelf, token, selectedType]);
 
   useEffect(() => {
     const currentStream = stream;
@@ -82,6 +91,17 @@ export default function FaceRegistration() {
     setCameraActive(false);
   };
 
+  const switchRegistrationType = (type) => {
+    setRegistrationType(type);
+    setSelectedTargetId('');
+    setCapturedBlob(null);
+    if (capturedImageUrl) URL.revokeObjectURL(capturedImageUrl);
+    setCapturedImageUrl('');
+    setError('');
+    setSuccessMessage('');
+    stopCamera();
+  };
+
   const startCamera = async () => {
     setError('');
     setSuccessMessage('');
@@ -90,7 +110,7 @@ export default function FaceRegistration() {
       const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
       setStream(mediaStream);
       setCameraActive(true);
-    } catch (err) {
+    } catch {
       setError('Unable to access the camera. Please allow camera access and try again.');
       setCameraActive(false);
     }
@@ -139,7 +159,7 @@ export default function FaceRegistration() {
   };
 
   const handleSubmit = async () => {
-    if (!selectedStudentId || !capturedBlob) {
+    if ((!isSelf && !selectedTargetId) || !capturedBlob) {
       setError('Capture a photo before submitting.');
       return;
     }
@@ -152,12 +172,22 @@ export default function FaceRegistration() {
     setSuccessMessage('');
 
     try {
-      const response = await api.post(`/students/${selectedStudentId}/face-registration`, formData, {
+      const endpoint = isSelf
+        ? '/faculty/me/face-registration'
+        : selectedType === 'faculty'
+          ? `/faculty/${selectedTargetId}/face-registration`
+          : `/students/${selectedTargetId}/face-registration`;
+      const response = await api.post(endpoint, formData, {
         headers: {
           'Content-Type': undefined,
         },
       });
       setSuccessMessage(response.data.message || 'Face registration successful.');
+      if (!isSelf && selectedType === 'faculty') {
+        setFaculty((items) => items.map((member) => String(member.id) === selectedTargetId
+          ? { ...member, face_registered: true }
+          : member));
+      }
       setCapturedBlob(null);
       if (capturedImageUrl) {
         URL.revokeObjectURL(capturedImageUrl);
@@ -173,40 +203,55 @@ export default function FaceRegistration() {
   };
 
   useEffect(() => {
-    if (!selectedStudentId) {
+    if (!selectedTargetId) {
       setCapturedBlob(null);
       setCapturedImageUrl('');
     }
-  }, [selectedStudentId]);
+  }, [selectedTargetId]);
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '24px' }}>
-      <h2>Face Registration</h2>
+      <h2>{isSelf ? 'My Face Registration' : 'Face Registration'}</h2>
+      {isSelf ? <p>Register or update the face used to identify your faculty profile.</p> : null}
+
+      {!isSelf ? (
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', alignItems: 'center' }}>
+          <strong>Register for</strong>
+          <button type="button" aria-pressed={selectedType === 'student'} onClick={() => switchRegistrationType('student')} style={{ padding: '8px 14px', border: '1px solid #d1d5db', borderRadius: '6px', background: selectedType === 'student' ? '#dbeafe' : '#fff' }}>
+            Student
+          </button>
+          <button type="button" aria-pressed={selectedType === 'faculty'} onClick={() => switchRegistrationType('faculty')} style={{ padding: '8px 14px', border: '1px solid #d1d5db', borderRadius: '6px', background: selectedType === 'faculty' ? '#dbeafe' : '#fff' }}>
+            Faculty
+          </button>
+        </div>
+      ) : null}
 
       {loadingStudents ? (
-        <p>Loading students...</p>
-      ) : (
+        <p>Loading {selectedType}...</p>
+      ) : !isSelf ? (
         <div style={{ marginBottom: '20px' }}>
-          <label htmlFor="student-select" style={{ display: 'block', marginBottom: '8px', fontWeight: 600 }}>
-            Select student
+          <label htmlFor="registration-target-select" style={{ display: 'block', marginBottom: '8px', fontWeight: 600 }}>
+            Select {selectedType}
           </label>
           <select
-            id="student-select"
-            value={selectedStudentId}
-            onChange={(event) => setSelectedStudentId(event.target.value)}
+            id="registration-target-select"
+            value={selectedTargetId}
+            onChange={(event) => setSelectedTargetId(event.target.value)}
             style={{ width: '100%', maxWidth: '360px', padding: '10px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
           >
-            <option value="">Choose a student</option>
-            {students.map((student) => (
-              <option key={student.id} value={student.id}>
-                {student.name} ({student.roll_number})
+            <option value="">Choose a {selectedType}</option>
+            {targets.map((target) => (
+              <option key={target.id} value={target.id}>
+                {selectedType === 'student'
+                  ? `${target.name} (${target.roll_number})`
+                  : `${target.name}${target.face_registered ? ' (Registered)' : ''}`}
               </option>
             ))}
           </select>
         </div>
-      )}
+      ) : null}
 
-      {selectedStudentId ? (
+      {(isSelf || selectedTargetId) && !loadingStudents ? (
         <div style={{ display: 'grid', gap: '16px' }}>
           {!cameraActive && !capturedImageUrl ? (
             <button type="button" onClick={startCamera} style={{ width: 'fit-content', padding: '10px 18px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>

@@ -9,6 +9,7 @@ import PageHeader from '../components/ui/PageHeader';
 import Spinner from '../components/ui/Spinner';
 import StatCard from '../components/ui/StatCard';
 import Table from '../components/ui/Table';
+import { yearLabel } from '../utils/labels';
 
 const weekdayNames = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
 
@@ -80,7 +81,10 @@ export default function StudentDashboard() {
         </div>
         <div className="key-stats">
           <div><span>Roll number</span><strong>{profile.roll_number}</strong></div>
-          <div><span>Academic year</span><strong>{profile.academic_year_name}</strong></div>
+          <div><span>Academic year</span><strong>{yearLabel(profile.academic_year || {
+            name: profile.academic_year_name,
+            programme_name: profile.programme_name || profile.academic_year_programme_name,
+          })}</strong></div>
           <div><span>Department</span><strong>{profile.department_name}</strong></div>
         </div>
       </Card>

@@ -23,10 +23,12 @@ function responseDetail(error, fallback) {
 function optionParts(option, field) {
   if (typeof option !== 'object') return { value: option, label: option };
   const valueKey = field.optionValue || 'id';
-  const labelKey = field.optionLabel || 'name';
+  const label = typeof field.optionLabel === 'function'
+    ? field.optionLabel(option)
+    : option[field.optionLabel || 'name'] ?? option.label ?? option[valueKey];
   return {
     value: option[valueKey] ?? option.value,
-    label: option[labelKey] ?? option.label ?? option[valueKey],
+    label,
   };
 }
 
@@ -178,7 +180,6 @@ export default function ManagementPage({
         <Card className="management-card">
           <div className="management-toolbar">
             <strong>{title}</strong>
-            {canCreate ? <Button onClick={() => openForm()}>{`Add ${title.replace(/s$/, '').toLowerCase()}`}</Button> : null}
           </div>
           {items.length ? (
             <Table headers={[...columns.map((column) => column.label), ...(showActions ? ['Actions'] : [])]} rows={rows} />

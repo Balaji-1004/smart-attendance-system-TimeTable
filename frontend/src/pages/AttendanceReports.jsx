@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import Badge from '../components/ui/Badge';
@@ -9,6 +9,7 @@ import ErrorMessage from '../components/ui/ErrorMessage';
 import PageHeader from '../components/ui/PageHeader';
 import Spinner from '../components/ui/Spinner';
 import Table from '../components/ui/Table';
+import { yearLabel } from '../utils/labels';
 
 const tabs = [
   { id: 'daily', label: 'Daily' },
@@ -67,9 +68,13 @@ function SelectField({ label, value, options, onChange, placeholder = 'Select' }
 export default function AttendanceReports() {
   const { role, faculty_id } = useAuth();
   const [activeTab, setActiveTab] = useState('daily');
+  const [programmes, setProgrammes] = useState([]);
+  const [selectedProgrammeId, setSelectedProgrammeId] = useState('');
+  const [programmesLoading, setProgrammesLoading] = useState(true);
   const [years, setYears] = useState([]);
   const [yearsLoading, setYearsLoading] = useState(true);
   const [yearsError, setYearsError] = useState('');
+  const yearsRequestId = useRef(0);
   const [dailyDate, setDailyDate] = useState(localDateString(new Date()));
   const [dailyYear, setDailyYear] = useState('');
   const [subjectYear, setSubjectYear] = useState('');
@@ -89,29 +94,59 @@ export default function AttendanceReports() {
   const setTabError = (tab, message) => setErrors((current) => ({ ...current, [tab]: message }));
   const setTabRows = (tab, data) => setRows((current) => ({ ...current, [tab]: data }));
 
-  const loadYears = useCallback(async () => {
+  const loadProgrammes = useCallback(async () => {
+    setProgrammesLoading(true);
     setYearsLoading(true);
     setYearsError('');
     try {
-      const response = await api.get('/academic-years');
-      const availableYears = response.data || [];
-      setYears(availableYears);
-      if (availableYears.length) {
-        const firstId = String(availableYears[0].id);
-        setSubjectYear((value) => value || firstId);
-        setHistoryYear((value) => value || firstId);
-        setClassYear((value) => value || firstId);
-      }
+      const response = await api.get('/programmes');
+      const items = response.data || [];
+      setProgrammes(items);
+      if (items.length) setSelectedProgrammeId(String(items[0].id));
+      else setYearsLoading(false);
     } catch (requestError) {
-      setYearsError(requestError?.response?.data?.detail || 'Failed to load academic years.');
-    } finally {
+      setYearsError(requestError?.response?.data?.detail || 'Failed to load programmes.');
       setYearsLoading(false);
+    } finally {
+      setProgrammesLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    loadProgrammes();
+  }, [loadProgrammes]);
+
+  const loadYears = useCallback(async () => {
+    const requestId = yearsRequestId.current + 1;
+    yearsRequestId.current = requestId;
+    setYearsLoading(true);
+    setYearsError('');
+    setYears([]);
+    try {
+      const query = selectedProgrammeId ? `?programme_id=${encodeURIComponent(selectedProgrammeId)}` : '';
+      const response = await api.get(`/academic-years${query}`);
+      if (requestId !== yearsRequestId.current) return;
+      const availableYears = response.data || [];
+      setYears(availableYears);
+      const firstId = String(availableYears[0]?.id || '');
+      const hasYear = (value) => availableYears.some((year) => String(year.id) === value);
+      setDailyYear((value) => hasYear(value) ? value : '');
+      setSubjectYear((value) => hasYear(value) ? value : firstId);
+      setHistoryYear((value) => hasYear(value) ? value : firstId);
+      setClassYear((value) => hasYear(value) ? value : firstId);
+    } catch (requestError) {
+      if (requestId === yearsRequestId.current) {
+        setYearsError(requestError?.response?.data?.detail || 'Failed to load academic years.');
+      }
+    } finally {
+      if (requestId === yearsRequestId.current) setYearsLoading(false);
+    }
+  }, [selectedProgrammeId]);
+
+  useEffect(() => {
+    if (programmesLoading || (programmes.length === 0 && !selectedProgrammeId)) return;
     loadYears();
-  }, [loadYears]);
+  }, [programmesLoading, programmes.length, selectedProgrammeId, loadYears]);
 
   useEffect(() => {
     if (activeTab !== 'daily' || !dailyDate || yearsLoading) return;
@@ -291,7 +326,23 @@ export default function AttendanceReports() {
     };
   }, [activeTab, shownRows]);
 
-  const yearOptions = years.map((year) => ({ id: year.id, name: year.name }));
+  const yearOptions = years.map((year) => ({ id: year.id, name: yearLabel(year) }));
+  const changeProgramme = (programmeId) => {
+    setSelectedProgrammeId(programmeId);
+    setDailyYear('');
+    setSubjectYear('');
+    setHistoryYear('');
+    setClassYear('');
+  };
+  const programmeSelect = (
+    <SelectField
+      label="Programme"
+      value={selectedProgrammeId}
+      options={programmes.map((programme) => ({ id: programme.id, name: programme.name }))}
+      onChange={changeProgramme}
+      placeholder="All programmes"
+    />
+  );
   const selectOptions = {
     daily: (
       <>
@@ -355,12 +406,23 @@ export default function AttendanceReports() {
       </div>
 
       {yearsLoading ? <Spinner label="Loading academic years..." /> : null}
-      {!yearsLoading && yearsError ? <ErrorMessage message={yearsError} onRetry={loadYears} /> : null}
-      {!yearsLoading && !yearsError && years.length === 0 ? <EmptyState title="No academic years" description="There are no academic years available for reports." /> : null}
+      {!yearsLoading && yearsError ? (
+        <>
+          {programmes.length ? <div className="report-filters">{programmeSelect}</div> : null}
+          <ErrorMessage message={yearsError} onRetry={programmes.length ? loadYears : loadProgrammes} />
+        </>
+      ) : null}
+      {!yearsLoading && !yearsError && years.length === 0 ? (
+        <>
+          {programmes.length ? <div className="report-filters">{programmeSelect}</div> : null}
+          <EmptyState title="No academic years" description="There are no academic years available for reports." />
+        </>
+      ) : null}
 
       {!yearsLoading && !yearsError && years.length > 0 ? (
         <Card className="full-width">
           <div className="report-filters">
+            {programmeSelect}
             {selectOptions[activeTab]}
             <Button variant="secondary" disabled={Boolean(loading[activeTab]) || !shownRows.length} onClick={() => downloadCsv(csvData.filename, csvData.headers, csvData.rows)}>
               Download CSV

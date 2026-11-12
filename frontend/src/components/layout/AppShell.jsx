@@ -7,6 +7,7 @@ import Sidebar from './Sidebar';
 const pageTitles = {
   '/hod/dashboard': 'HOD Dashboard',
   '/academic-years': 'Academic Years',
+  '/programmes': 'Programmes',
   '/faculty': 'Faculty',
   '/subjects': 'Subjects',
   '/labs': 'Labs',
@@ -20,6 +21,7 @@ const pageTitles = {
   '/attendance': 'Attendance Session',
   '/reports': 'Attendance Reports',
   '/face-registration': 'Face Registration',
+  '/my-face-registration': 'My Face Registration',
 };
 
 export default function AppShell({ children }) {

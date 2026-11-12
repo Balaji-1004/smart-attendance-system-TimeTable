@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import TimetableGrid from '../components/TimetableGrid';
 import api from '../services/api';
+import { yearLabel } from '../utils/labels';
 
 export default function DepartmentTimetableView() {
   const { token } = useAuth();
@@ -18,18 +19,28 @@ export default function DepartmentTimetableView() {
       }
 
       try {
-        const response = await api.get('/timetable/department');
-
+        const [timetableResponse, yearsResponse] = await Promise.all([
+          api.get('/timetable/department'),
+          api.get('/academic-years'),
+        ]);
+        const yearsById = new Map((yearsResponse.data || []).map((year) => [String(year.id), year]));
         const grouped = {};
-        (response.data || []).forEach((entry) => {
-          const key = entry.academic_year_id;
-          if (!grouped[key]) {
-            grouped[key] = {
-              name: entry.academic_year_name || `Academic Year ${entry.academic_year_id}`,
-              entries: [],
+        (timetableResponse.data || []).forEach((entry) => {
+          const academicYear = yearsById.get(String(entry.academic_year_id));
+          const programmeName = academicYear?.programme_name || entry.programme_name || 'Programme';
+          const programmeId = academicYear?.programme_id || entry.programme_id || programmeName;
+          if (!grouped[programmeId]) grouped[programmeId] = { name: programmeName, years: {} };
+
+          const yearId = String(entry.academic_year_id);
+          if (!grouped[programmeId].years[yearId]) {
+            const year = {
+              ...(academicYear || {}),
+              name: academicYear?.name || entry.academic_year_name || `Academic Year ${yearId}`,
+              programme_name: programmeName,
             };
+            grouped[programmeId].years[yearId] = { name: yearLabel(year), entries: [] };
           }
-          grouped[key].entries.push(entry);
+          grouped[programmeId].years[yearId].entries.push(entry);
         });
 
         setEntriesByYear(grouped);
@@ -54,10 +65,15 @@ export default function DepartmentTimetableView() {
         <p>No department timetable entries exist yet.</p>
       ) : null}
 
-      {!loading && Object.entries(entriesByYear).map(([yearId, data]) => (
-        <div key={yearId} style={{ marginTop: '24px' }}>
-          <h3 style={{ marginBottom: '12px' }}>{data.name}</h3>
-          <TimetableGrid entries={data.entries} />
+      {!loading && Object.entries(entriesByYear).map(([programmeId, programme]) => (
+        <div key={programmeId} style={{ marginTop: '24px' }}>
+          <h3 style={{ marginBottom: '12px' }}>{programme.name}</h3>
+          {Object.entries(programme.years).map(([yearId, year]) => (
+            <div key={yearId} style={{ marginTop: '16px' }}>
+              <h4 style={{ marginBottom: '12px' }}>{year.name}</h4>
+              <TimetableGrid entries={year.entries} />
+            </div>
+          ))}
         </div>
       ))}
     </div>

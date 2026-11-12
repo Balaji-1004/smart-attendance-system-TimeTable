@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+import { yearLabel } from '../utils/labels';
 import TimetableGrid from '../components/TimetableGrid';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -40,12 +41,14 @@ export default function FacultyDashboard() {
     setError('');
     try {
       const today = new Date();
-      const [timetableResponse, sessionsResponse] = await Promise.all([
+      const [timetableResponse, sessionsResponse, yearsResponse] = await Promise.all([
         api.get(`/timetable/faculty/${faculty_id}`),
         api.get(`/attendance-sessions?date=${localDateString(today)}`),
+        api.get('/academic-years'),
       ]);
       const timetable = timetableResponse.data || [];
       const sessions = sessionsResponse.data || [];
+      const years = yearsResponse.data || [];
       const yearIds = [...new Set(timetable.map((entry) => entry.academic_year_id))];
       const reportResponses = await Promise.all(
         yearIds.map((yearId) => api.get(`/reports/attendance/class-summary/${yearId}`))
@@ -53,7 +56,7 @@ export default function FacultyDashboard() {
       const attendance = reportResponses.flatMap((response, index) =>
         (response.data || []).map((row) => ({ ...row, academic_year_id: yearIds[index] }))
       );
-      setData({ timetable, sessions, attendance, todayName: weekdayNames[today.getDay()] });
+      setData({ timetable, sessions, attendance, years, todayName: weekdayNames[today.getDay()] });
     } catch (requestError) {
       setError(requestError?.response?.data?.detail || 'Failed to load faculty dashboard.');
     } finally {
@@ -86,6 +89,15 @@ export default function FacultyDashboard() {
   const openSessions = data.sessions.filter((session) => session.status === 'OPEN');
   const closedSessions = data.sessions.filter((session) => session.status === 'CLOSED');
   const entryById = new Map(data.timetable.map((entry) => [entry.id, entry]));
+  const academicYearLabel = (yearId) => {
+    const year = data.years.find((item) => Number(item.id) === Number(yearId));
+    if (year) return yearLabel(year);
+    const entry = data.timetable.find((item) => Number(item.academic_year_id) === Number(yearId));
+    return yearLabel({
+      name: entry?.academic_year_name || `Academic Year ${yearId}`,
+      programme_name: entry?.programme_name,
+    });
+  };
 
   return (
     <>
@@ -97,6 +109,13 @@ export default function FacultyDashboard() {
         <StatCard label="Open sessions today" value={openSessions.length} />
         <StatCard label="Closed sessions today" value={closedSessions.length} />
       </div>
+
+      <Card className="panel-panel">
+        <div className="section-heading">
+          <h3>My face registration</h3>
+          <Link to="/my-face-registration"><Button variant="secondary">Register face</Button></Link>
+        </div>
+      </Card>
 
       <div className="dashboard-grid">
         <Card className="panel-panel">
@@ -137,7 +156,7 @@ export default function FacultyDashboard() {
           <Table
             headers={['Subject', 'Academic year']}
             rows={subjects.map((subject) => (
-              <tr key={subject.subject_id}><td>{subject.subject_name}</td><td>Year {subject.academic_year_id}</td></tr>
+              <tr key={subject.subject_id}><td>{subject.subject_name}</td><td>{academicYearLabel(subject.academic_year_id)}</td></tr>
             ))}
           />
         ) : <EmptyState title="No assigned subjects" description="Subjects from your timetable will appear here." />}
@@ -155,7 +174,7 @@ export default function FacultyDashboard() {
             headers={['Subject', 'Academic year', 'Present', 'Absent', 'Total', 'Attendance']}
             rows={data.attendance.map((row) => (
               <tr key={`${row.academic_year_id}-${row.subject_id}`}>
-                <td>{row.subject_name}</td><td>Year {row.academic_year_id}</td>
+                <td>{row.subject_name}</td><td>{academicYearLabel(row.academic_year_id)}</td>
                 <td>{row.present_count}</td><td>{row.absent_count}</td><td>{row.total_count}</td>
                 <td>{Number(row.percentage).toFixed(1)}%</td>
               </tr>

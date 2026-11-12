@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
+import { yearLabel } from '../utils/labels';
 
 export default function AttendanceSessionPage() {
   const { token, role, faculty_id } = useAuth();
@@ -327,7 +328,7 @@ export default function AttendanceSessionPage() {
   const activeSession = sessions.find((session) => String(session.id) === String(selectedSessionId));
   const activeSessionYear = academicYears.find((year) => Number(year.id) === Number(activeSession?.academic_year_id));
   const activeSessionYearLabel = activeSessionYear
-    ? `${activeSessionYear.name} (ID: ${activeSessionYear.id})`
+    ? `${yearLabel(activeSessionYear)} (ID: ${activeSessionYear.id})`
     : activeSession?.academic_year_id
       ? `Academic year ID ${activeSession.academic_year_id}`
       : 'Unknown academic year';
@@ -349,12 +350,12 @@ export default function AttendanceSessionPage() {
               <select id="year-selector" value={selectedYearId} onChange={(event) => setSelectedYearId(event.target.value)} style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #d1d5db' }}>
                 <option value="">Select a year</option>
                 {academicYears.map((year) => (
-                  <option key={year.id} value={year.id}>{year.name} (ID: {year.id})</option>
+                  <option key={year.id} value={year.id}>{yearLabel(year)} (ID: {year.id})</option>
                 ))}
               </select>
               {selectedYearId ? (
                 <p style={{ margin: '8px 0 0', fontSize: '13px', color: '#4b5563' }}>
-                  Selected year: {academicYears.find((year) => Number(year.id) === Number(selectedYearId))?.name || 'Unknown'} (ID: {selectedYearId})
+                  Selected year: {yearLabel(academicYears.find((year) => Number(year.id) === Number(selectedYearId))) || 'Unknown'} (ID: {selectedYearId})
                 </p>
               ) : null}
             </div>

@@ -119,7 +119,6 @@ export default function FacultyAvailabilityPage() {
                 {faculty.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
               </select>
             </label>
-            <Button onClick={openAdd}>Add availability</Button>
           </div>
           {memberItems.length ? <Table headers={['Day', 'Period', 'Actions']} rows={rows} /> : <EmptyState title="No unavailable periods" description="No unavailable periods are recorded for this faculty member." />}
         </Card>

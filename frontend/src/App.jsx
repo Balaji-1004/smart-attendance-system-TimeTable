@@ -12,6 +12,7 @@ import DepartmentTimetableView from './pages/DepartmentTimetableView';
 import AttendanceSessionPage from './pages/AttendanceSession';
 import FaceRegistration from './pages/FaceRegistration';
 import AcademicYearsPage from './pages/AcademicYearsPage';
+import ProgrammesPage from './pages/ProgrammesPage';
 import FacultyPage from './pages/FacultyPage';
 import SubjectsPage from './pages/SubjectsPage';
 import LabsPage from './pages/LabsPage';
@@ -37,6 +38,7 @@ function AppRoutes() {
 
       <Route path="/hod/dashboard" element={<ProtectedRoute roles={['HOD']}><AppShell><HODDashboard /></AppShell></ProtectedRoute>} />
       <Route path="/academic-years" element={<ProtectedRoute roles={['HOD']}><AppShell><AcademicYearsPage /></AppShell></ProtectedRoute>} />
+      <Route path="/programmes" element={<ProtectedRoute roles={['HOD']}><AppShell><ProgrammesPage /></AppShell></ProtectedRoute>} />
       <Route path="/faculty" element={<ProtectedRoute roles={['HOD']}><AppShell><FacultyPage /></AppShell></ProtectedRoute>} />
       <Route path="/subjects" element={<ProtectedRoute roles={['HOD']}><AppShell><SubjectsPage /></AppShell></ProtectedRoute>} />
       <Route path="/labs" element={<ProtectedRoute roles={['HOD']}><AppShell><LabsPage /></AppShell></ProtectedRoute>} />
@@ -52,6 +54,7 @@ function AppRoutes() {
 
       <Route path="/attendance" element={<ProtectedRoute roles={['HOD', 'FACULTY']}><AppShell><AttendanceSessionPage /></AppShell></ProtectedRoute>} />
       <Route path="/face-registration" element={<ProtectedRoute roles={['HOD']}><AppShell><FaceRegistration /></AppShell></ProtectedRoute>} />
+      <Route path="/my-face-registration" element={<ProtectedRoute roles={['FACULTY']}><AppShell><FaceRegistration mode="self" /></AppShell></ProtectedRoute>} />
 
       <Route path="*" element={token ? <AppShell><NotFound /></AppShell> : <Navigate to="/login" replace />} />
     </Routes>
