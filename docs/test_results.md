@@ -158,3 +158,11 @@ test_department_isolation.py: OVERALL: PASS (24/24 checks)
 test_full_flow.py: OVERALL: PASS (12/12 checks)
 test_programmes.py: OVERALL: PASS (18/18 checks)
 ```
+
+On 2026-11-12, `scripts/seed_sample_attendance.py` created 14 CLOSED MCA demo
+sessions with 91 attendance rows and one empty OPEN session (id 15). The second
+run created 0 sessions and 0 attendance rows. Foreign-key and integrity checks
+passed, no duplicate `(session, student)` rows were found, each CLOSED session
+had attendance for every student in its year, and the face-data count/hash
+remained 3 / `f6e5a7c5c387fb582316c48519c656657deb6a407ce089baccab527e0cbc58a9`.
+Details and the session/date list are in [sample_data.md](./sample_data.md).
