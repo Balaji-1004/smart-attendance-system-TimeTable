@@ -22,4 +22,4 @@ The JSON response has `matched`, `student_id`, `student_name`, `confidence`, and
 
 ## Known limitation
 
-`backend/testing_notes_phase10.md` records that different-person scores in the tested data were well below threshold (approximately 0.39 versus 0.58), but same-person captures under genuinely different camera angles, lighting, and expressions have not been validated. Earlier positive checks used exact or near-identical images; that does not establish live classroom robustness. Threshold suitability must therefore be treated as unverified for real-world varied captures.
+`docs/testing_notes_phase10.md` records that different-person scores in the tested data were well below threshold (approximately 0.39 versus 0.58), but same-person captures under genuinely different camera angles, lighting, and expressions have not been validated. Earlier positive checks used exact or near-identical images; that does not establish live classroom robustness. Threshold suitability must therefore be treated as unverified for real-world varied captures.

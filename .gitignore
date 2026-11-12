@@ -23,3 +23,14 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Face data / calibration output
+backend/scripts/output/
+backend/scripts/models/
+backend/scripts/sample_face.*
+_tmp_calibration_face.jpg
+
+# Misc
+.pytest_cache/
+.vscode/
+*.log
