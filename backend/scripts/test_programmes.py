@@ -213,6 +213,27 @@ def main():
                     f"same-name-other-programme={year_mtech_same_name.status_code}",
                 )
             )
+            cross_programme_subject = client.post(
+                "/subjects",
+                json={
+                    "academic_year_id": year_one.json().get("id"),
+                    "name": "Cross Programme Faculty Subject",
+                    "code": "PROGRAMME-CROSS-FACULTY",
+                    "subject_type": "THEORY",
+                    "weekly_periods": 3,
+                    "faculty_id": faculty_user.faculty_id,
+                },
+                headers=hod_headers,
+            )
+            checks.append(
+                report(
+                    "Department faculty can teach a subject in another programme",
+                    cross_programme_subject.status_code == 200
+                    and cross_programme_subject.json().get("faculty_id") == faculty_user.faculty_id,
+                    f"status={cross_programme_subject.status_code}, "
+                    f"faculty_id={cross_programme_subject.json().get('faculty_id') if cross_programme_subject.status_code == 200 else 'none'}",
+                )
+            )
             cross_programme_year = client.post(
                 "/academic-years",
                 json={"programme_id": other_programme_id, "name": "Cross Department Year"},

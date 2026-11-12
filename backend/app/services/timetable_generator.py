@@ -79,7 +79,12 @@ def load_blocks_for_year(db, academic_year_id):
                     f"Subject '{subject_name}' has weekly_periods={subject.weekly_periods} which is not a multiple of 3; only whole 3-period lab blocks will be scheduled, {remainder} periods will be unmet."
                 )
 
-            for _ in range(full_blocks):
+            if full_blocks > 1:
+                warnings.append(
+                    f"Subject '{subject_name}' requests {full_blocks} lab blocks; only one lab session per week is allowed, {full_blocks - 1} blocks ({(full_blocks - 1) * 3} periods) will be unmet."
+                )
+
+            for _ in range(min(full_blocks, 1)):
                 lab_blocks.append(
                     ScheduleBlock(
                         subject_id=subject.id,
@@ -128,6 +133,29 @@ def _pending_payload(pending_entries):
         }
         for entry in pending_entries
     ]
+
+
+def _has_lab_block_on_day(db, academic_year_id, pending_entries, day):
+    existing = (
+        db.query(TimetableEntry.id)
+        .filter(
+            TimetableEntry.academic_year_id == academic_year_id,
+            TimetableEntry.day == day,
+            TimetableEntry.lab_id.isnot(None),
+        )
+        .first()
+    )
+    if existing is not None:
+        return True
+    return any(
+        _normalize_lab_day(getattr(entry, "day", None)) == _normalize_lab_day(day)
+        and getattr(entry, "lab_id", None) is not None
+        for entry in pending_entries
+    )
+
+
+def _normalize_lab_day(day):
+    return day.value if hasattr(day, "value") else day
 
 
 def _count_validator_call(node_counter):
@@ -216,6 +244,8 @@ def try_place_lab_block(
     node_counter=None,
 ):
     for day, start_period, lab_id in generate_candidates_for_lab_block(block, all_lab_ids):
+        if _has_lab_block_on_day(db, block.academic_year_id, pending_entries, day):
+            continue
         placed = _place_lab_candidate(
             db,
             block,
@@ -328,6 +358,13 @@ def run_generation(db, academic_year_id, use_backtracking=True):
                 if node_counter[0] >= MAX_NODES:
                     node_limit_reached = True
                     return False
+                if is_lab and _has_lab_block_on_day(
+                    db,
+                    block.academic_year_id,
+                    pending_entries,
+                    candidate[0],
+                ):
+                    continue
                 if is_lab:
                     placed = _place_lab_candidate(
                         db,
