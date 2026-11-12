@@ -5,11 +5,12 @@
 `load_blocks_for_year` in `backend/app/services/timetable_generator.py` loads the academic year's subjects:
 
 - Each THEORY subject produces one duration-1 block per `weekly_periods`.
-- Each LAB subject produces `weekly_periods // 3` duration-3 blocks. A nonzero remainder produces a loader warning and is not placed as a partial block.
+- Each LAB subject can produce at most one duration-3 block per week. When `weekly_periods // 3` exceeds one, the extra blocks are not placed and a loader warning reports the unmet periods. A nonzero remainder also produces a loader warning and is not placed as a partial block.
 - LAB blocks are processed before THEORY blocks.
 - Within each group, `_order_blocks_by_faculty_periods` sorts by descending total weekly periods assigned to the faculty in that academic year, then ascending subject id.
 
 Theory candidates follow weekday enum order and period enum order. Lab candidates follow weekday order, start at P1 then P4, and iterate the academic year's department lab ids in ascending order.
+The generator permits at most one lab block for an academic year on any weekday, and at most one weekly block for each LAB subject.
 
 ## Placement and backtracking
 
@@ -35,6 +36,8 @@ If a later block cannot be placed, recursion removes the prior block's candidate
 | LAB requires a room; THEORY cannot have a room | `check_lab_room_consistency`. |
 | Labs occupy three consecutive periods and start only at P1 or P4 | `get_lab_block_periods` returns P1-P3 or P4-P6; `validate_lab_block` rejects other starts. |
 | Concurrent occupied lab slots cannot exceed the department's lab count | `check_lab_concurrency` is called with the academic year's `department_id`; existing entries are joined to `Lab` and only that department's labs are counted. The generator also selects lab ids from that department. |
+| An academic year has at most one lab block per weekday | `try_place_lab_block` and the recursive search skip candidate weekdays already occupied by an existing or pending lab block. |
+| A LAB subject has at most one session per week | `load_blocks_for_year` creates no more than one LAB block per subject; additional requested blocks are reported as a loader warning rather than silently discarded. |
 
 `check_lab_concurrency` retains unscoped behavior when called without a department id. In generation it is always supplied with the academic year's department, so another department's simultaneous lab usage does not consume local capacity.
 
@@ -48,4 +51,4 @@ If a later block cannot be placed, recursion removes the prior block's candidate
 
 ## Regression results
 
-On fresh migrated test copies, the four current academic years (MCA 1st/2nd Year and MTech 1st/2nd Year) scheduled 21, 15, 11, and 11 entries respectively, with no unscheduled blocks or uniqueness violations. The tight regression placed 6 of 9 entries greedily, leaving the constrained lab block unscheduled; backtracking placed all 9. Repeating the same year produced identical entries. A fully unavailable 3-period requirement terminated with 0 placed, 3 unscheduled, and 30 validator calls. See [test_results.md](./test_results.md).
+The latest fresh-copy results are recorded in [test_results.md](./test_results.md). The backtracking regression also checks the one-lab-block-per-weekday and one-session-per-LAB-subject limits, including explicit shortfall reporting when a subject requests multiple lab blocks.
